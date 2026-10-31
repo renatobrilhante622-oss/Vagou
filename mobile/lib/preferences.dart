@@ -103,7 +103,7 @@ class _PreferencesSheetState extends State<_PreferencesSheet> {
       Row(children: [
         Expanded(child: TextField(controller: _city, enabled: !_busy, textCapitalization: TextCapitalization.words, decoration: const InputDecoration(labelText: 'Cidade', prefixIcon: Icon(Icons.location_city_outlined)))),
         const SizedBox(width: 10),
-        SizedBox(width: 108, child: DropdownButtonFormField<String>(initialValue: _state.isEmpty ? '' : _state, decoration: const InputDecoration(labelText: 'UF'), items: [const DropdownMenuItem(value: '', child: Text('Todas')), for (final state in _states) DropdownMenuItem(value: state, child: Text(state))], onChanged: _busy ? null : (value) => setState(() => _state = value ?? ''))),
+        SizedBox(width: 110, child: DropdownButtonFormField<String>(isExpanded: true, initialValue: _state.isEmpty ? '' : _state, decoration: const InputDecoration(labelText: 'UF', contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 18)), items: [const DropdownMenuItem(value: '', child: Text('Todas')), for (final state in _states) DropdownMenuItem(value: state, child: Text(state))], onChanged: _busy ? null : (value) => setState(() => _state = value ?? ''))),
       ]),
       const SizedBox(height: 16),
       const Text('Modalidade', style: TextStyle(fontWeight: FontWeight.w700)),

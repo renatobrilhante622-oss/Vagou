@@ -37,6 +37,9 @@ void main() {
     ))));
 
     expect(find.text('Filtros e Preferências'), findsNothing);
+    await tester.scrollUntilVisible(find.text('Meu Plano'), 250,
+      scrollable: find.byType(Scrollable).first);
+    await tester.pumpAndSettle();
     expect(find.text('Meu Plano'), findsOneWidget);
     await tester.scrollUntilVisible(find.text('Atualizar meu acesso'), 300,
       scrollable: find.byType(Scrollable).first);
