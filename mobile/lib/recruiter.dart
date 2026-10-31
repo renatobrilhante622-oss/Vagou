@@ -103,9 +103,25 @@ class RecruiterApplications extends StatefulWidget {
 class _RecruiterApplicationsState extends State<RecruiterApplications> {
   late Future<dynamic> data;
   String? changing, downloading;
+  final locationFilter = TextEditingController(), salaryFilter = TextEditingController();
+  int minMatch = 0;
+  String workStyle = '', courseFilter = '';
   @override
   void initState() { super.initState(); reload(); }
-  void reload() { data = widget.api.request('GET', '/applications?limit=100'); }
+  @override
+  void dispose() { locationFilter.dispose(); salaryFilter.dispose(); super.dispose(); }
+  void reload() {
+    final query = <String, String>{'limit': '100', 'min_match': '$minMatch'};
+    if (locationFilter.text.trim().isNotEmpty) query['location'] = locationFilter.text.trim();
+    if (salaryFilter.text.trim().isNotEmpty) {
+      final ceiling = double.tryParse(salaryFilter.text.trim().replaceAll(',', '.'));
+      if (ceiling != null && ceiling >= 0) query['salary_ceiling'] = '$ceiling';
+    }
+    if (workStyle.isNotEmpty) query['work_style'] = workStyle;
+    if (courseFilter.isNotEmpty) query['completed_course_id'] = courseFilter;
+    data = widget.api.request('GET', '/recruiter/applicants?${Uri(queryParameters: query).query}')
+      .then((result) => (result as Map)['items'] as List);
+  }
   Future<void> update(String id, String value) async {
     setState(() => changing = id);
     try { await widget.api.request('PATCH', '/applications/$id', {'status': value}); if (mounted) setState(reload); }
@@ -137,17 +153,49 @@ class _RecruiterApplicationsState extends State<RecruiterApplications> {
     if (snapshot.hasError) return EmptyState(icon: Icons.cloud_off, title: 'Não conseguimos consultar agora', message: 'Tente novamente para acompanhar seus candidatos.', onRetry: () => setState(reload));
     final rows = snapshot.data as List;
     return RefreshIndicator(onRefresh: () async { setState(reload); await data; }, child: ListView(padding: const EdgeInsets.all(20), physics: const AlwaysScrollableScrollPhysics(), children: [
-      const SectionTitle(title: 'Cada candidatura é uma possibilidade', subtitle: 'Acompanhe os candidatos e mantenha o status atualizado.'),
+      const SectionTitle(title: 'Cada candidatura é uma possibilidade', subtitle: 'Filtre apenas pessoas inscritas em vagas da sua empresa.'),
+      Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Filtros de recrutamento', style: TextStyle(fontWeight: FontWeight.w800)),
+        const SizedBox(height: 8),
+        const Text('Compatibilidade técnica e preferências profissionais declaradas. Não use atributos pessoais ou sensíveis para seleção.'),
+        const SizedBox(height: 12),
+        TextField(controller: locationFilter, decoration: const InputDecoration(labelText: 'Cidade/UF declarada', prefixIcon: Icon(Icons.location_on_outlined))),
+        const SizedBox(height: 12),
+        TextField(controller: salaryFilter, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Pretensão até R\$ (opcional)', prefixIcon: Icon(Icons.payments_outlined))),
+        const SizedBox(height: 12),
+        DropdownButtonFormField<String>(initialValue: workStyle, decoration: const InputDecoration(labelText: 'Estilo de trabalho compatível'), items: const [
+          DropdownMenuItem(value: '', child: Text('Todos')),
+          DropdownMenuItem(value: 'remote', child: Text('Remoto')),
+          DropdownMenuItem(value: 'hybrid', child: Text('Híbrido')),
+          DropdownMenuItem(value: 'onsite', child: Text('Presencial')),
+        ], onChanged: (value) => setState(() => workStyle = value ?? '')),
+        const SizedBox(height: 12),
+        DropdownButtonFormField<String>(initialValue: courseFilter, decoration: const InputDecoration(labelText: 'Curso concluído (declarado)'), items: const [
+          DropdownMenuItem(value: '', child: Text('Qualquer curso')),
+          DropdownMenuItem(value: 'bradesco-python', child: Text('Python · Fundação Bradesco')),
+          DropdownMenuItem(value: 'senai', child: Text('Qualificação · SENAI')),
+          DropdownMenuItem(value: 'sebrae', child: Text('Gestão · Sebrae')),
+          DropdownMenuItem(value: 'microsoft', child: Text('Microsoft Learn')),
+          DropdownMenuItem(value: 'cisco', child: Text('Python · Cisco')),
+        ], onChanged: (value) => setState(() => courseFilter = value ?? '')),
+        const SizedBox(height: 12),
+        Text('Compatibilidade técnica mínima: $minMatch%'),
+        Slider(value: minMatch.toDouble(), min: 0, max: 100, divisions: 10, label: '$minMatch%', onChanged: (value) => setState(() => minMatch = value.round())),
+        SizedBox(width: double.infinity, child: FilledButton.icon(onPressed: () => setState(reload), icon: const Icon(Icons.filter_alt_outlined), label: const Text('Aplicar filtros'))),
+      ])),
+
       if (rows.isEmpty) const EmptyState(icon: Icons.people_outline, title: 'Suas conexões aparecerão aqui', message: 'Depois da aprovação das vagas, as candidaturas ficarão disponíveis nesta área.'),
       for (final row in rows) Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(row['candidate_name'] ?? 'Candidato', style: Theme.of(context).textTheme.titleLarge), const SizedBox(height: 6),
         Text(row['job_title'] ?? 'Oportunidade', style: Theme.of(context).textTheme.titleMedium), const SizedBox(height: 8),
-        Text('Compatibilidade: ${row['match_score']}% · ${row['source'] == 'automatic' ? 'Automática' : 'Manual'}'),
+        Text('Compatibilidade técnica: ${row['match_score']}% · Modalidade: ${row['work_style_fit'] == 'aligned' ? 'alinhada' : row['work_style_fit'] == 'different' ? 'diferente' : 'não informada'}'),
+        const SizedBox(height: 4), Text('Localidade: ${(row['preferred_locations'] as List? ?? []).join(', ')} · Pretensão: R\$ ${row['salary_expectation'] ?? 'não informada'}'),
+        const SizedBox(height: 4), Text('Cursos informados: ${(row['completed_course_ids'] as List? ?? []).isEmpty ? 'nenhum' : (row['completed_course_ids'] as List).join(', ')} (autodeclarados)'),
         const SizedBox(height: 6), Text(formatDate(row['created_at'])), const SizedBox(height: 12),
         OutlinedButton.icon(onPressed: downloading != null ? null : () => saveResume(row['id'].toString()), icon: downloading == row['id'] ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.download_outlined), label: const Text('Salvar currículo PDF')), const SizedBox(height: 12),
         DropdownButtonFormField<String>(initialValue: row['status'], decoration: const InputDecoration(labelText: 'Etapa do processo'), items: [for (final value in ['submitted', 'reviewing', 'interview', 'rejected', 'hired']) DropdownMenuItem(value: value, child: Text(statusLabel(value)))], onChanged: changing == row['id'] ? null : (v) { if (v != null && v != 'submitted') update(row['id'], v); }),
       ])),
-      if (rows.length == 100) const Text('Exibindo as 100 candidaturas mais recentes.'),
+      if (rows.length == 100) const Text('Exibindo até 100 candidaturas por consulta. Refine os filtros para localizar outros perfis.'),
     ]));
   });
 }
