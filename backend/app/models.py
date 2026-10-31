@@ -71,7 +71,7 @@ class Application(Base):
     source: Mapped[str] = mapped_column(String(16))
     status: Mapped[str] = mapped_column(String(24), default='submitted')
     match_score: Mapped[int] = mapped_column(Integer)
-    status_updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    status_updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     __table_args__ = (
         UniqueConstraint('candidate_id', 'job_id', name='uq_application_candidate_job'),
