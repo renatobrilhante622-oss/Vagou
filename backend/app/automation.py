@@ -1,4 +1,5 @@
 """Authenticated read-only execution reports for the candidate who owns them."""
+import asyncio
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -50,3 +51,22 @@ async def report_events(run_id: UUID, offset: int = Query(0, ge=0), limit: int =
         .order_by(AutomationEvent.created_at, AutomationEvent.id).offset(offset).limit(limit))).all())
     return {'run': run_view(run), 'items': [event_view(event) for event in events],
             'next_offset': offset + len(events) if len(events) == limit else None}
+
+
+@router.post('/run', status_code=202)
+async def enqueue_now(user: User = Depends(role('candidate'))):
+    """Request an immediate cycle; server state is authoritative for Premium."""
+    premium(user)
+    if not user.automation_enabled:
+        raise HTTPException(409, 'Ative e salve suas preferências de envio automático primeiro.')
+    if not user.resume_key:
+        raise HTTPException(409, 'Envie seu currículo PDF antes de iniciar os envios.')
+    prefs = user.preferences or {}
+    if not prefs.get('titles') or not prefs.get('modalities'):
+        raise HTTPException(422, 'Configure os cargos e modalidades de interesse antes de iniciar.')
+    try:
+        from app.worker import run_automation
+        await asyncio.to_thread(run_automation.delay)
+    except Exception:
+        raise HTTPException(503, 'Não foi possível agendar a busca agora. O serviço tentará novamente no próximo ciclo.') from None
+    return {'status': 'queued', 'message': 'Busca agendada. Acompanhe os resultados em Relatórios.'}

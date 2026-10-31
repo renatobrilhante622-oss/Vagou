@@ -28,12 +28,12 @@ DB = Depends(session)
 def account_view(user):
     return {'id': user.id, 'email': user.email, 'name': user.name, 'role': user.role, 'skills': user.skills,
             'is_premium': user.is_premium, 'automation_enabled': user.automation_enabled,
-            'has_resume': bool(user.resume_key), 'preferences': user.preferences,
+            'has_resume': bool(user.resume_key), 'preferences': user.preferences or {},
             'phone': cipher().decrypt(user.phone_encrypted.encode()).decode() if user.phone_encrypted else None,
             'email_verified': user.email_verified, 'company_cnpj': user.company_cnpj,
             'company_name': user.company_name, 'company_contact_email': user.company_contact_email,
             'profile_completion': round(100 * sum([bool(user.name), bool(user.skills),
-                bool(user.phone_encrypted), bool(user.resume_key), bool(user.preferences.get('titles'))]) / 5)}
+                bool(user.phone_encrypted), bool(user.resume_key), bool((user.preferences or {}).get('titles'))]) / 5)}
 
 
 @router.get('/me')
@@ -54,10 +54,27 @@ async def profile(payload: ProfileUpdate, user: User = Candidate, db: AsyncSessi
 async def preferences(payload: Preferences, user: User = Candidate, db: AsyncSession = DB):
     if payload.automation_enabled and not user.is_premium:
         raise HTTPException(403, 'Premium subscription required')
-    user.preferences = payload.model_dump(exclude={'automation_enabled'})
+    updated_preferences = payload.model_dump(exclude={'automation_enabled'})
+    if 'completed_course_ids' not in payload.model_fields_set:
+        updated_preferences['completed_course_ids'] = (user.preferences or {}).get('completed_course_ids', [])
+    user.preferences = updated_preferences
     user.automation_enabled = payload.automation_enabled
     await db.commit()
     return {**user.preferences, 'automation_enabled': user.automation_enabled}
+
+
+@router.post('/me/courses/{course_id}')
+async def declare_course_completion(course_id: str, user: User = Candidate, db: AsyncSession = DB):
+    if course_id not in {course['id'] for course in COURSES}:
+        raise HTTPException(404, 'Curso não encontrado no catálogo.')
+    current = dict(user.preferences or {})
+    completed = list(current.get('completed_course_ids') or [])
+    if course_id not in completed:
+        completed.append(course_id)
+    current['completed_course_ids'] = completed
+    user.preferences = current
+    await db.commit()
+    return {'completed_course_ids': completed, 'declaration': 'Informação declarada pelo candidato, sem verificação da instituição.'}
 
 
 @router.delete('/me', status_code=204)
@@ -226,6 +243,88 @@ async def application_status(application_id: uuid.UUID, payload: StatusUpdate, u
     application.status = payload.status
     await db.commit()
     return {'id': application.id, 'status': application.status}
+
+
+@router.get('/recruiter/applicants')
+async def recruiter_applicants(
+    job_id: uuid.UUID | None = None,
+    min_match: int = Query(0, ge=0, le=100),
+    location: str | None = Query(None, max_length=120),
+    salary_ceiling: float | None = Query(None, ge=0, le=1000000),
+    completed_course_id: str | None = Query(None, max_length=100),
+    work_style: str | None = Query(None, pattern=r'^(remote|hybrid|onsite)
+async def dashboard(user: User = Candidate, db: AsyncSession = DB):
+    rows = (await db.execute(select(Application.source, Application.status, func.count(Application.id), func.sum(Application.match_score)).where(Application.candidate_id == user.id).group_by(Application.source, Application.status))).all()
+    total = sum(r[2] for r in rows)
+    by_status = {}
+    for _, status, count, _ in rows:
+        by_status[status] = by_status.get(status, 0) + count
+    observation = 0
+    # Stream bounded batches instead of retaining the entire job catalog.
+    result = await db.stream_scalars(select(Job).where(Job.active.is_(True), Job.moderation_status == 'approved').execution_options(yield_per=200))
+    async for job in result:
+        if eligible(job, user.preferences) and match(user.skills, job.keywords)['category'] == 'observation':
+            observation += 1
+    return {'total_applications': total, 'manual': sum(r[2] for r in rows if r[0] == 'manual'),
+            'automatic': sum(r[2] for r in rows if r[0] == 'automatic'), 'observation_jobs': observation,
+            'average_match_score': round(sum(r[3] for r in rows) / total, 2) if total else 0,
+            'by_status': by_status, 'generated_at': datetime.now(timezone.utc)}
+
+
+@router.get('/courses')
+async def courses(skill: str | None = Query(None, max_length=80)):
+    return [c for c in COURSES if skill is None or normalize(skill) in {normalize(x) for x in c['skills']}]
+),
+    offset: int = Query(0, ge=0), limit: int = Query(30, ge=1, le=100),
+    user: User = Recruiter, db: AsyncSession = DB,
+):
+    """Recruiter-only, auditable filters on applicants to this recruiter's vacancies.
+
+    Course completion is SELF-DECLARED, never a verified certificate. Work-style
+    fit uses only explicitly selected modalities, not inferred personal traits.
+    """
+    query = (select(Application, Job, User)
+             .join(Job, Job.id == Application.job_id)
+             .join(User, User.id == Application.candidate_id)
+             .where(Job.recruiter_id == user.id, Application.match_score >= min_match)
+             .order_by(Application.created_at.desc(), Application.id))
+    if job_id is not None:
+        query = query.where(Job.id == job_id)
+    result = await db.stream(query.execution_options(yield_per=100))
+    items = []
+    matched = 0
+    try:
+        async for application, job, candidate in result:
+            prefs = candidate.preferences or {}
+            places = prefs.get('locations') or []
+            modalities = prefs.get('modalities') or []
+            declared_courses = prefs.get('completed_course_ids') or []
+            if location and not any(normalize(location) in normalize(str(place)) for place in places):
+                continue
+            if salary_ceiling is not None and float(prefs.get('min_salary') or 0) > salary_ceiling:
+                continue
+            if completed_course_id and completed_course_id not in declared_courses:
+                continue
+            if work_style and work_style not in modalities:
+                continue
+            if matched >= offset:
+                items.append({
+                    'id': application.id, 'candidate_name': candidate.name,
+                    'job_id': job.id, 'job_title': job.title, 'status': application.status,
+                    'match_score': application.match_score, 'created_at': application.created_at,
+                    'preferred_locations': places, 'salary_expectation': prefs.get('min_salary'),
+                    'preferred_modalities': modalities,
+                    'completed_course_ids': declared_courses, 'course_evidence': 'self_declared',
+                    'work_style_fit': 'aligned' if job.modality in modalities else 'not_informed' if not modalities else 'different',
+                })
+                if len(items) > limit:
+                    break
+            matched += 1
+    finally:
+        await result.close()
+    return {'items': items[:limit], 'next_offset': offset + limit if len(items) > limit else None,
+            'filters_applied': {'min_match': min_match, 'location': location, 'salary_ceiling': salary_ceiling,
+                                'completed_course_id': completed_course_id, 'work_style': work_style}}
 
 
 @router.get('/dashboard')

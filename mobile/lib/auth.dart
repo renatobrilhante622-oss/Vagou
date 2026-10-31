@@ -22,8 +22,9 @@ class _AuthScreenState extends State<AuthScreen> {
   String? requiredField(String? value) => value == null || value.trim().isEmpty ? 'Preencha este campo.' : null;
   String? emailValidator(String? value) => RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(value?.trim() ?? '') ? null : 'Informe um e-mail válido.';
 
-  Future<void> verify() async {
-    await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => VerificationScreen(api: widget.api, email: email.text.trim())));
+  Future<bool> verify() async {
+    final verified = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => VerificationScreen(api: widget.api, email: email.text.trim())));
+    return verified == true;
   }
 
   Future<void> submit() async {
@@ -41,15 +42,15 @@ class _AuthScreenState extends State<AuthScreen> {
           await friendlyError(context, const ApiException('Sua conta foi criada, mas o serviço de e-mail ainda precisa ser configurado pelo operador. Após a ativação, solicite um novo código para confirmar seu cadastro.'));
           if (!mounted) return;
         }
-        await verify();
-        if (mounted) { setState(() => register = false); ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Após confirmar o código, entre com seu e-mail e senha.'))); }
+        final verified = await verify();
+        if (mounted && verified) { setState(() => register = false); ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('E-mail confirmado. Entre com sua senha para continuar.'))); }
       } else {
         await widget.api.login(email.text.trim(), password.text);
         await widget.onAuthenticated();
       }
     } on ApiException catch (e) {
       if (!mounted) return;
-      if (e.code == 'email_verification_required') { await verify(); }
+      if (e.code == 'email_verification_required') { if (await verify()) { await widget.api.login(email.text.trim(), password.text); await widget.onAuthenticated(); } }
       else { await friendlyError(context, e); }
     } catch (e) { if (mounted) await friendlyError(context, e); }
     finally { if (mounted) setState(() => busy = false); }
