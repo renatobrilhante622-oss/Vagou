@@ -26,16 +26,11 @@ jobs:
         with:
           channel: 'stable'
 
-      - name: Create Android platform files safely
+      - name: Generate Android Platform Files
         run: |
-          cp -r lib lib_backup
-          cp pubspec.yaml pubspec_backup.yaml
           flutter create --platforms=android --org br.com.vagou .
-          cp -r lib_backup/* lib/
-          cp pubspec_backup.yaml pubspec.yaml
-          rm -rf lib_backup pubspec_backup.yaml
 
-      - name: Force Android SDK 36 and Cleartext Traffic
+      - name: Force SDK 36 and Cleartext Traffic
         shell: python
         run: |
           import pathlib, re
@@ -48,29 +43,28 @@ jobs:
                   txt = txt.replace("<application", '<application android:usesCleartextTraffic="true"', 1)
                   manifest.write_text(txt, encoding="utf-8")
 
-          # 2. Força compileSdk = 36 e targetSdk = 36 no build.gradle(.kts) do app
-          for p in [pathlib.Path("android/app/build.gradle.kts"), pathlib.Path("android/app/build.gradle")]:
-              if p.exists():
-                  content = p.read_text(encoding="utf-8")
-                  content = re.sub(r'compileSdk\s*=?\s*[^\n]+', 'compileSdk = 36' if p.suffix == '.kts' else 'compileSdk 36', content)
-                  content = re.sub(r'compileSdkVersion\s+[^\n]+', 'compileSdkVersion 36', content)
-                  content = re.sub(r'targetSdk\s*=?\s*[^\n]+', 'targetSdk = 36' if p.suffix == '.kts' else 'targetSdk 36', content)
-                  content = re.sub(r'targetSdkVersion\s+[^\n]+', 'targetSdkVersion 36', content)
-                  content = re.sub(r'minSdk\s*=?\s*[^\n]+', 'minSdk = 24' if p.suffix == '.kts' else 'minSdk 24', content)
-                  content = re.sub(r'minSdkVersion\s+[^\n]+', 'minSdkVersion 24', content)
-                  p.write_text(content, encoding="utf-8")
+          # 2. Força compileSdk = 36 e targetSdk = 36 em qualquer build.gradle ou build.gradle.kts
+          for p in pathlib.Path("android").rglob("build.gradle*"):
+              content = p.read_text(encoding="utf-8")
+              # Substitui referências antigas de compileSdk / compileSdkVersion para 36
+              content = re.sub(r'compileSdk\s*=?\s*[^\n]+', 'compileSdk = 36' if p.suffix == '.kts' else 'compileSdk 36', content)
+              content = re.sub(r'compileSdkVersion\s+[^\n]+', 'compileSdkVersion 36', content)
+              content = re.sub(r'targetSdk\s*=?\s*[^\n]+', 'targetSdk = 36' if p.suffix == '.kts' else 'targetSdk 36', content)
+              content = re.sub(r'targetSdkVersion\s+[^\n]+', 'targetSdkVersion 36', content)
+              content = re.sub(r'minSdk\s*=?\s*[^\n]+', 'minSdk = 24' if p.suffix == '.kts' else 'minSdk 24', content)
+              content = re.sub(r'minSdkVersion\s+[^\n]+', 'minSdkVersion 24', content)
+              p.write_text(content, encoding="utf-8")
+              print(f"Atualizado SDK para 36 em: {p}")
 
-          # 3. Adiciona propriedades globais do Android no gradle.properties para calar qualquer aviso de SDK
+          # 3. Garante propriedades no gradle.properties
           props_path = pathlib.Path("android/gradle.properties")
           if props_path.exists():
               props = props_path.read_text(encoding="utf-8")
           else:
               props = ""
-          
-          extra_props = "\nandroid.useAndroidX=true\nandroid.enableJetifier=true\n"
-          if "android.compileSdkVersion" not in props:
-              extra_props += "android.compileSdkVersion=36\n"
-          props_path.write_text(props + extra_props, encoding="utf-8")
+          if "android.useAndroidX" not in props:
+              props += "\nandroid.useAndroidX=true\nandroid.enableJetifier=true\n"
+          props_path.write_text(props, encoding="utf-8")
 
       - name: Install dependencies and build APK
         run: |
