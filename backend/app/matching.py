@@ -91,7 +91,7 @@ def evaluate_job(job, skills: list[str], preferences: dict) -> dict:
 
     total_weight = sum(weight for weight, _ in components)
     score = round(sum(weight * value for weight, value in components) / total_weight) if total_weight else 0
-    category = 'strong' if score >= 70 else 'possible' if score >= 40 else 'discarded'
+    category = 'strong' if score >= 70 and skill_match['match_score'] > 75 else 'possible' if score >= 40 else 'discarded'
     return {'match_score': score, 'category': category, 'match_reasons': reasons, 'missed_reasons': missed}
 
 

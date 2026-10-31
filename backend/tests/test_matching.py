@@ -40,16 +40,20 @@ class MatchingTests(unittest.TestCase):
         self.assertEqual(filter_reason(job, {'keywords': ['Java']}), 'Palavras-chave não encontradas.')
 
     def test_evaluate_job_returns_strong_possible_and_discarded_reasons(self):
-        job = SimpleNamespace(title='Analista Python', description='Python e SQL', keywords=['python', 'sql'],
+        job = SimpleNamespace(title='Analista Python', description='Python, SQL, Docker e Redis',
+            keywords=['python', 'sql', 'docker', 'redis'],
             salary_max=6000, modality='hybrid', location='Recife / PE', contract_type='clt')
         preferences = {'titles': ['Analista'], 'keywords': ['python'], 'locations': ['Recife / PE'],
             'modalities': ['hybrid'], 'min_salary': 5000, 'contract_types': ['clt']}
-        strong = evaluate_job(job, ['python', 'sql'], preferences)
+        strong = evaluate_job(job, ['python', 'sql', 'docker', 'redis'], preferences)
+        high_preference_partial_skills = evaluate_job(job, ['python', 'sql', 'docker'], preferences)
         possible = evaluate_job(job, ['python'], {**preferences, 'titles': ['Engenheiro'], 'locations': ['Brasília / DF']})
         discarded = evaluate_job(job, [], {**preferences, 'titles': ['Engenheiro'], 'keywords': ['java'],
             'locations': ['Brasília / DF'], 'modalities': ['onsite'], 'contract_types': ['pj'], 'min_salary': 10000})
         self.assertEqual(strong['category'], 'strong')
         self.assertEqual(strong['match_score'], 100)
+        self.assertGreaterEqual(high_preference_partial_skills['match_score'], 70)
+        self.assertEqual(high_preference_partial_skills['category'], 'possible')
         self.assertEqual(possible['category'], 'possible')
         self.assertTrue(any('Cidade/UF' in reason for reason in possible['missed_reasons']))
         self.assertEqual(discarded['category'], 'discarded')
