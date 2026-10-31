@@ -253,37 +253,11 @@ async def recruiter_applicants(
     location: str | None = Query(None, max_length=120),
     salary_ceiling: float | None = Query(None, ge=0, le=1000000),
     completed_course_id: str | None = Query(None, max_length=100),
-    work_style: str | None = Query(None, pattern=r'^(remote|hybrid|onsite)
-async def dashboard(user: User = Candidate, db: AsyncSession = DB):
-    rows = (await db.execute(select(Application.source, Application.status, func.count(Application.id), func.sum(Application.match_score)).where(Application.candidate_id == user.id).group_by(Application.source, Application.status))).all()
-    total = sum(r[2] for r in rows)
-    by_status = {}
-    for _, status, count, _ in rows:
-        by_status[status] = by_status.get(status, 0) + count
-    observation = 0
-    # Stream bounded batches instead of retaining the entire job catalog.
-    result = await db.stream_scalars(select(Job).where(Job.active.is_(True), Job.moderation_status == 'approved').execution_options(yield_per=200))
-    async for job in result:
-        if eligible(job, user.preferences) and match(user.skills, job.keywords)['category'] == 'observation':
-            observation += 1
-    return {'total_applications': total, 'manual': sum(r[2] for r in rows if r[0] == 'manual'),
-            'automatic': sum(r[2] for r in rows if r[0] == 'automatic'), 'observation_jobs': observation,
-            'average_match_score': round(sum(r[3] for r in rows) / total, 2) if total else 0,
-            'by_status': by_status, 'generated_at': datetime.now(timezone.utc)}
-
-
-@router.get('/courses')
-async def courses(skill: str | None = Query(None, max_length=80)):
-    return [c for c in COURSES if skill is None or normalize(skill) in {normalize(x) for x in c['skills']}]
-),
+    work_style: str | None = Query(None, pattern=r'^(remote|hybrid|onsite)$'),
     offset: int = Query(0, ge=0), limit: int = Query(30, ge=1, le=100),
     user: User = Recruiter, db: AsyncSession = DB,
 ):
-    """Recruiter-only, auditable filters on applicants to this recruiter's vacancies.
-
-    Course completion is SELF-DECLARED, never a verified certificate. Work-style
-    fit uses only explicitly selected modalities, not inferred personal traits.
-    """
+    """Applicant filters for own jobs; no personal characteristics are inferred."""
     query = (select(Application, Job, User)
              .join(Job, Job.id == Application.job_id)
              .join(User, User.id == Application.candidate_id)
@@ -324,13 +298,15 @@ async def courses(skill: str | None = Query(None, max_length=80)):
     finally:
         await result.close()
     return {'items': items[:limit], 'next_offset': offset + limit if len(items) > limit else None,
-            'filters_applied': {'min_match': min_match, 'location': location, 'salary_ceiling': salary_ceiling,
+            'filters_applied': {'min_match': min_match, 'location': location,
+                                'salary_ceiling': salary_ceiling,
                                 'completed_course_id': completed_course_id, 'work_style': work_style}}
 
 
 @router.get('/notifications')
-async def candidate_notifications(limit: int = Query(20, ge=1, le=50), user: User = Candidate, db: AsyncSession = DB):
-    """Most recent status updates; read-only inbox, no false push-delivery claim."""
+async def candidate_notifications(limit: int = Query(20, ge=1, le=50),
+                                  user: User = Candidate, db: AsyncSession = DB):
+    """Read-only inbox of employer status changes, without push claims."""
     query = (select(Application, Job)
              .join(Job, Job.id == Application.job_id)
              .where(Application.candidate_id == user.id, Application.status != 'submitted')
