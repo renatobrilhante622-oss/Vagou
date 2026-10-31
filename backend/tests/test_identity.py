@@ -57,3 +57,18 @@ class IdentitySchemas(unittest.TestCase):
         self.assertNotIn('moderated_at', PublicJobOut.model_fields)
         self.assertIn('moderation_note', JobOut.model_fields)
         self.assertIn('moderated_at', JobOut.model_fields)
+
+    def test_registration_canonicalizes_all_supported_numeric_masks(self):
+        from app.schemas import Register
+        from pydantic import ValidationError
+        data = {'email': 'empresa@example.com', 'password': 'Corporate-Password-2026!', 'name': 'Contato', 'role': 'recruiter', 'privacy_version': '2026-01', 'consent': True,
+                'company_name': 'Empresa Ltda', 'company_contact_email': 'contato@gmail.com', 'company_phone': '+5511999999999'}
+        for value in ['04252011000110', '04.252.011/0001-10', '\u00a004.252.011 / 0001\u201110\u202f', '04 . 252 . 011 / 0001 - 10']:
+            with self.subTest(value=value):
+                self.assertEqual(Register(**data, company_cnpj=value).company_cnpj, '04252011000110')
+        # More than the former 32-character limit, still a legitimate pasted mask.
+        padded_mask = '04' + ' ' * 24 + '.252.011/0001-10'
+        self.assertEqual(Register(**data, company_cnpj=padded_mask).company_cnpj, '04252011000110')
+        for value in ['04.252.011/0001-11', '04!252011000110', 4252011000110]:
+            with self.subTest(value=value), self.assertRaises(ValidationError):
+                Register(**data, company_cnpj=value)

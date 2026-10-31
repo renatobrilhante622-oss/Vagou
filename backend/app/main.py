@@ -14,6 +14,7 @@ from app.auth import router as auth_router
 from app.moderation import router as moderation_router
 from app.automation import router as automation_router
 from app import automation_models
+from app.smtp_transport import configure_smtp_logging
 
 # Redis uses server time windows; INCR and expiry run atomically across API instances.
 RATE_SCRIPT = """
@@ -25,6 +26,7 @@ return n
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    configure_smtp_logging()
     app.state.redis = Redis.from_url(settings().redis_url)
     yield
     await app.state.redis.aclose()

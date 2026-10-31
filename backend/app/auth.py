@@ -2,6 +2,7 @@
 import asyncio
 import hashlib
 import hmac
+import logging
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -17,8 +18,10 @@ from app.mailer import email_configured, process_email_outbox
 from app.models import EmailOutbox, EmailVerification, User
 from app.schemas import Login, Register, ResendVerification, VerifyEmail
 from app.security import DUMMY_HASH, cipher, current_user, hash_password, token, verify_password
+from app.verification_debug import log_verification_fallback
 
 router = APIRouter(prefix='/v1/auth', tags=['Autenticação'])
+logger = logging.getLogger('uvicorn.error')
 
 
 def verification_digest(user_id: uuid.UUID, version: uuid.UUID, code: str) -> str:
@@ -44,6 +47,27 @@ async def queue_verification(db: AsyncSession, user: User, challenge: EmailVerif
     db.add(EmailOutbox(user_id=user.id, verification_version=version,
                        code_encrypted=cipher().encrypt(code.encode()).decode(),
                        next_attempt_at=now))
+    return code
+
+
+async def attempt_verification_delivery(user_id: uuid.UUID, code: str) -> str:
+    """Invoked after account/code commit. Delivery never rolls back registration."""
+    status = 'configuration_required'
+    if email_configured():
+        try:
+            result = await asyncio.wait_for(
+                process_email_outbox(batch_size=1, only_user_id=user_id),
+                timeout=settings().verification_delivery_timeout_seconds,
+            )
+            status = 'sent' if result['sent'] else 'retrying'
+        except Exception as error:
+            logger.error('verification_dispatch_failed error_type=%s', type(error).__name__)
+            status = 'retrying'
+    else:
+        logger.error('verification_smtp_configuration_incomplete')
+    if status != 'sent':
+        log_verification_fallback(code)
+    return status
 
 
 def account_response(user: User) -> dict:
@@ -69,21 +93,12 @@ async def register(payload: Register, db: AsyncSession = Depends(session)):
     db.add(user)
     try:
         await db.flush()
-        await queue_verification(db, user)
+        code = await queue_verification(db, user)
         await db.commit()
     except IntegrityError:
         await db.rollback()
         raise HTTPException(409, 'Já existe cadastro com este e-mail ou CNPJ. Entre na sua conta ou solicite um novo código.') from None
-    configured = email_configured()
-    delivery_status = 'configuration_required'
-    if configured:
-        # Try only this newly registered account. Durable outbox retries SMTP
-        # failures; neither the code nor provider error text is exposed.
-        try:
-            attempt = await process_email_outbox(batch_size=1, only_user_id=user.id)
-            delivery_status = 'sent' if attempt['sent'] else 'retrying'
-        except Exception:
-            delivery_status = 'retrying'
+    delivery_status = await attempt_verification_delivery(user.id, code)
     message = {
         'sent': 'Código de confirmação enviado. Verifique também a pasta de spam.',
         'retrying': 'O e-mail ainda não foi entregue. O serviço continuará tentando; você também pode solicitar outro código.',
@@ -138,8 +153,9 @@ async def resend(payload: ResendVerification, db: AsyncSession = Depends(session
     challenge = await db.get(EmailVerification, user.id, with_for_update=True)
     if challenge and (datetime.now(timezone.utc) - challenge.sent_at).total_seconds() < settings().verification_resend_seconds:
         return response
-    await queue_verification(db, user, challenge)
+    code = await queue_verification(db, user, challenge)
     await db.commit()
+    await attempt_verification_delivery(user.id, code)
     return response
 
 

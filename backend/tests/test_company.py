@@ -21,3 +21,22 @@ class CnpjChecks(unittest.TestCase):
         for value in ['11.222.333/0001-81', ' 11.222.333 / 0001 - 81 ', '12abc34501DE35']:
             self.assertTrue(valid_cnpj(value))
         self.assertFalse(valid_cnpj('11!222333000181'))
+
+    def test_known_cnpjs_keep_leading_zeroes_and_pasted_masks(self):
+        values = [
+            ('04.252.011/0001-10', '04252011000110'),
+            ('00.000.000/0001-91', '00000000000191'),
+            ('\u00a004.252.011 / 0001\u201110\u202f', '04252011000110'),
+            ('11 . 222 . 333 / 0001 \u2013 81', '11222333000181'),
+        ]
+        from app.company import normalize_cnpj
+        for masked, canonical in values:
+            with self.subTest(masked=masked):
+                self.assertEqual(normalize_cnpj(masked), canonical)
+                self.assertTrue(valid_cnpj(masked))
+                self.assertTrue(valid_cnpj(canonical))
+
+    def test_format_tolerance_never_bypasses_checksum_or_type(self):
+        for value in ['04.252.011/0001-11', '11.222.333/0001-82', '04!252011000110', None, 4252011000110]:
+            with self.subTest(value=value):
+                self.assertFalse(valid_cnpj(value))

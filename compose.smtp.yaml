@@ -1,0 +1,9 @@
+# Runtime-only SMTP settings; no credentials are baked into the image.
+# Create the ignored backend/.env.smtp.local before using this overlay.
+services:
+  api:
+    env_file: [./backend/.env.smtp.local]
+  worker:
+    env_file: [./backend/.env.smtp.local]
+  beat:
+    env_file: [./backend/.env.smtp.local]

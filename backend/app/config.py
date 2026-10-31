@@ -1,4 +1,5 @@
 from functools import lru_cache
+import os
 from pathlib import Path
 from typing import Literal
 
@@ -8,7 +9,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file='.env', extra='ignore', env_ignore_empty=True)
+    model_config = SettingsConfigDict(
+        env_file=(Path(__file__).resolve().parents[1] / '.env',
+                  Path(__file__).resolve().parents[1] / '.env.smtp.local'),
+        extra='ignore', env_ignore_empty=True, hide_input_in_errors=True,
+    )
+    environment: Literal['development', 'test', 'production'] = Field(default='production', validation_alias=AliasChoices('APP_ENV', 'environment'))
+    debug_verification_codes: bool = False
     database_url: str = 'postgresql+asyncpg://vagou:vagou@localhost:5432/vagou'
     jwt_secret: SecretStr
     data_key: SecretStr
@@ -22,7 +29,7 @@ class Settings(BaseSettings):
     privacy_version: str = '2026-01'
     smtp_host: str = ''
     smtp_port: int = Field(default=587, ge=1, le=65535)
-    smtp_username: str = Field(default='', validation_alias=AliasChoices('SMTP_USERNAME', 'SMTP_USER', 'smtp_username'))
+    smtp_username: str = Field(default='', validation_alias=AliasChoices('SMTP_USER', 'SMTP_USERNAME', 'smtp_username'))
     smtp_password: SecretStr | None = None
     smtp_from: str = ''
     smtp_security: Literal['starttls', 'ssl'] = 'starttls'
@@ -37,6 +44,7 @@ class Settings(BaseSettings):
     verification_expiry_minutes: int = Field(default=10, ge=5, le=30)
     verification_max_attempts: int = Field(default=5, ge=3, le=10)
     verification_resend_seconds: int = Field(default=60, ge=30, le=3600)
+    verification_delivery_timeout_seconds: int = Field(default=5, ge=1, le=10)
 
     @model_validator(mode='after')
     def validate_keys(self):
@@ -53,4 +61,5 @@ class Settings(BaseSettings):
 
 @lru_cache
 def settings() -> Settings:
-    return Settings()
+    override = os.environ.get('VAGOU_ENV_FILE')
+    return Settings(_env_file=override) if override is not None else Settings()

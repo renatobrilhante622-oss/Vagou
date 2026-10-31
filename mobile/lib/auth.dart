@@ -81,7 +81,7 @@ class _AuthScreenState extends State<AuthScreen> {
     field(password, 'Senha', Icons.lock_outline_rounded, secret: true, validator: (v) => v == null || v.isEmpty ? 'Informe sua senha.' : register && v.length < 12 ? 'Use no mínimo 12 caracteres.' : null),
     if (register && role == 'recruiter') ...[
       const SectionTitle(title: 'Sua empresa', subtitle: 'Esses dados ajudam a criar um ambiente de confiança.'),
-      field(cnpj, 'CNPJ', Icons.badge_outlined, validator: (v) => validCnpj(v ?? '') ? null : 'Confira os 14 caracteres e os dígitos verificadores do CNPJ.'),
+      field(cnpj, 'CNPJ (com ou sem máscara)', Icons.badge_outlined, validator: (v) => validCnpj(v ?? '') ? null : 'Confira os 14 caracteres e os dígitos verificadores do CNPJ.'),
       field(company, 'Razão social', Icons.business_outlined),
       field(contact, 'E-mail corporativo', Icons.alternate_email, type: TextInputType.emailAddress, validator: emailValidator),
       field(phone, 'Contato corporativo (+55 e DDD)', Icons.phone_outlined, type: TextInputType.phone, validator: (v) => RegExp(r'^\+55\d{10,11}$').hasMatch(v ?? '') ? null : 'Use +55 seguido de DDD e número.'),

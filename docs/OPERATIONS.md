@@ -109,3 +109,32 @@ flutter test
 ```
 
 A aprovação de testes locais puros ou sintaxe não comprova o funcionamento integrado de PostgreSQL, Celery, SMTP ou APK. Confira sempre os resultados reais do CI e faça um teste de entrega Gmail com sua conta configurada.
+
+## Correção SMTP e diagnóstico local de confirmação
+
+A configuração privada de SMTP deve ficar em `backend/.env.smtp.local`, ignorado pelo Git e excluído do contexto Docker. A senha não pertence ao arquivo rastreado `backend/.env`. Use `backend/.env.smtp.example` como modelo; não copie credenciais para o repositório. `SMTP_USER` tem prioridade sobre o alias legado `SMTP_USERNAME`. O remetente explícito em `SMTP_FROM` é preservado; se vazio, será usado o usuário autenticado. No Gmail, um remetente diferente da conta autenticada precisa estar autorizado como alias em “Enviar e-mail como”; o Google pode reescrever ou rejeitar remetentes não autorizados.
+
+O backend resolve seus arquivos dotenv a partir da pasta do próprio backend, independente do diretório de execução. `VAGOU_ENV_FILE` permite selecionar outro arquivo; os testes usam `/dev/null` para não ler credenciais privadas. Para passar o arquivo privado aos contêineres sem alterar as redes, portas ou variáveis existentes do banco:
+
+```bash
+docker compose -f compose.yaml -f compose.smtp.yaml up -d --build api worker beat
+```
+
+O arquivo privado precisa existir na máquina que executa esse comando. Arquivos privados criados no ambiente de desenvolvimento em nuvem não são enviados ao GitHub nem ao seu computador. `.dockerignore` impede que arquivos dotenv reais sejam incorporados às imagens. O overlay injeta as variáveis somente em tempo de execução.
+
+Os logs indicam fases de conexão, STARTTLS, autenticação, envio e aceite SMTP, e classificam falhas pelo tipo e código numérico do provedor. Eles não incluem senha, destinatário, conteúdo da mensagem nem resposta bruta do Google. Aceite SMTP não comprova chegada à caixa de entrada.
+
+A conta e seu desafio de confirmação são gravados antes da tentativa de envio. A tentativa imediata tem orçamento de cinco segundos (`VERIFICATION_DELIVERY_TIMEOUT_SECONDS`, máximo dez); lentidão não mantém o cadastro aberto indefinidamente. A outbox continua permitindo retries. Um timeout pode resultar em entrega duplicada do mesmo código, mas apenas o desafio atual pode ser confirmado uma vez.
+
+### Fallback solicitado para testes
+
+Somente em desenvolvimento/testes, defina no arquivo privado:
+
+```dotenv
+APP_ENV=development
+DEBUG_VERIFICATION_CODES=true
+```
+
+Se a entrega imediata falhar ou o SMTP não estiver configurado, o processo da **API**, depois do commit do cadastro, escreve `DEBUG VERIFICATION CODE: ` seguido dos seis dígitos nos logs. Consulte `docker compose -f compose.yaml -f compose.smtp.yaml logs api` em um terminal privado. O mesmo vale para um reenvio efetivamente agendado. A conta permanece pendente até confirmar o código; não há bypass de autenticação.
+
+Esse recurso é falso por padrão e permanece inativo com `APP_ENV=production`, mesmo que o flag esteja ligado. Ao terminar os testes, use `APP_ENV=production` e `DEBUG_VERIFICATION_CODES=false` e recrie os serviços. Evite compartilhar logs de teste, pois eles passam a conter códigos de acesso. Nenhum código real deve ser publicado em issues ou no Git.

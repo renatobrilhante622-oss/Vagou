@@ -3,6 +3,9 @@ import os
 import secrets
 from cryptography.fernet import Fernet
 
+# Tests never discover a developer's private SMTP file or contact Gmail.
+os.environ.setdefault('VAGOU_ENV_FILE', '/dev/null')
+
 if not os.environ.get('VAGOU_TEST_URL'):
     os.environ.setdefault('JWT_SECRET', secrets.token_urlsafe(48))
     os.environ.setdefault('DATA_KEY', Fernet.generate_key().decode())

@@ -35,7 +35,7 @@ class Register(StrictModel):
     role: Role
     privacy_version: str
     consent: Literal[True]
-    company_cnpj: str | None = Field(default=None, max_length=32)
+    company_cnpj: str | None = Field(default=None, max_length=64)
     company_name: str | None = Field(default=None, min_length=2, max_length=200)
     company_contact_email: EmailStr | None = None
     company_phone: str | None = None

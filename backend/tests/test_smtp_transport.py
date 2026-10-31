@@ -101,3 +101,72 @@ class SmtpTransportContract(unittest.TestCase):
         connection.login.assert_not_called()
         connection.send_message.assert_not_called()
         connection.close.assert_called_once()
+
+    def test_diagnostics_cover_connection_tls_authentication_and_provider_failures(self):
+        cases = [
+            ('connect', OSError('private candidate@example.com 001234 test-app-password'), 'connection', 'connecting'),
+            ('tls', ssl.SSLError('private candidate@example.com 001234 test-app-password'), 'tls', 'starttls'),
+            ('auth', smtplib.SMTPAuthenticationError(535, b'private candidate@example.com 001234 test-app-password'), 'authentication', 'authenticating'),
+            ('send', smtplib.SMTPDataError(554, b'private candidate@example.com 001234 test-app-password'), 'provider', 'sending'),
+        ]
+        for operation, failure, category, phase in cases:
+            with self.subTest(operation=operation):
+                connection = self.connection()
+                if operation == 'tls':
+                    connection.starttls.side_effect = failure
+                elif operation == 'auth':
+                    connection.login.side_effect = failure
+                elif operation == 'send':
+                    connection.send_message.side_effect = failure
+                with patch('app.smtp_transport.settings', return_value=transport_settings()), \
+                     patch('app.smtp_transport.smtplib.SMTP', side_effect=failure if operation == 'connect' else None, return_value=connection), \
+                     self.assertLogs('app.smtp_transport', level='INFO') as captured:
+                    with self.assertRaises(type(failure)):
+                        deliver_confirmation('candidate@example.com', '001234')
+                logs = '\n'.join(captured.output)
+                self.assertIn('category=' + category, logs)
+                self.assertIn('phase=' + phase, logs)
+                if operation == 'auth':
+                    self.assertIn('smtp_code=535', logs)
+                for sensitive in ['candidate@example.com', 'sender@example.com', '001234', 'test-app-password', 'private']:
+                    self.assertNotIn(sensitive, logs)
+                if operation != 'connect':
+                    connection.close.assert_called_once()
+
+    def test_success_logs_progress_without_payload_or_identity(self):
+        connection = self.connection()
+        with patch('app.smtp_transport.settings', return_value=transport_settings()), \
+             patch('app.smtp_transport.smtplib.SMTP', return_value=connection), \
+             self.assertLogs('app.smtp_transport', level='INFO') as captured:
+            deliver_confirmation('candidate@example.com', '001234')
+        logs = '\n'.join(captured.output)
+        for phase in ['connecting', 'starttls', 'authenticating', 'sending']:
+            self.assertIn('phase=' + phase, logs)
+        self.assertIn('delivery_accepted', logs)
+        for sensitive in ['candidate@example.com', 'sender@example.com', '001234', 'test-app-password']:
+            self.assertNotIn(sensitive, logs)
+
+    def test_cleanup_failure_does_not_mask_authentication_failure(self):
+        connection = self.connection()
+        failure = smtplib.SMTPAuthenticationError(535, b'private')
+        connection.login.side_effect = failure
+        connection.close.side_effect = OSError('private cleanup details')
+        with patch('app.smtp_transport.settings', return_value=transport_settings()), \
+             patch('app.smtp_transport.smtplib.SMTP', return_value=connection), \
+             self.assertLogs('app.smtp_transport', level='ERROR') as captured:
+            with self.assertRaises(smtplib.SMTPAuthenticationError) as result:
+                deliver_confirmation('candidate@example.com', '001234')
+        self.assertIs(result.exception, failure)
+        self.assertIn('cleanup_failed', '\n'.join(captured.output))
+        self.assertNotIn('private', '\n'.join(captured.output))
+
+    def test_cleanup_failure_does_not_change_accepted_delivery(self):
+        connection = self.connection()
+        connection.close.side_effect = OSError('private cleanup details')
+        with patch('app.smtp_transport.settings', return_value=transport_settings()), \
+             patch('app.smtp_transport.smtplib.SMTP', return_value=connection), \
+             self.assertLogs('app.smtp_transport', level='INFO') as captured:
+            deliver_confirmation('candidate@example.com', '001234')
+        self.assertIn('delivery_accepted', '\n'.join(captured.output))
+        self.assertIn('cleanup_failed', '\n'.join(captured.output))
+        self.assertNotIn('private', '\n'.join(captured.output))
