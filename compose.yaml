@@ -1,52 +1,78 @@
 services:
   postgres:
     image: postgres:16-alpine
+    container_name: vagou_db
     environment:
       POSTGRES_USER: vagou
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: postgres
       POSTGRES_DB: vagou
-    volumes: [pgdata:/var/lib/postgresql/data]
+    ports:
+      - "5432:5432"
+    volumes: 
+      - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: [CMD-SHELL, 'pg_isready -U vagou -d vagou']
+      test: ["CMD-SHELL", "pg_isready -U vagou -d vagou"]
       interval: 5s
       retries: 10
+
   redis:
     image: redis:7-alpine
+    container_name: vagou_redis
     command: [redis-server, --appendonly, 'yes']
     volumes: [redisdata:/data]
     healthcheck:
       test: [CMD, redis-cli, ping]
       interval: 5s
       retries: 10
+
   migrate:
     build: ./backend
-    env_file: ./backend/.env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://vagou:postgres@postgres:5432/vagou
+      - JWT_SECRET=sua-chave-jwt-super-secreta-aqui-123456
+      - DATA_KEY=bW9kdWxlc3RyZWFtY29uZmlndXJhdGlvbnMxMjM0NTY=
     command: [alembic, upgrade, head]
     depends_on:
       postgres: {condition: service_healthy}
+
   api:
     build: ./backend
-    env_file: ./backend/.env
-    ports: ['127.0.0.1:8000:8000']
+    ports: ['0.0.0.0:8000:8000']
     volumes: [resumes:/data/resumes]
-    environment: {STORAGE_DIR: /data/resumes}
+    environment: 
+      - STORAGE_DIR=/data/resumes
+      - DATABASE_URL=postgresql+asyncpg://vagou:postgres@postgres:5432/vagou
+      - REDIS_URL=redis://redis:6379/0
+      - JWT_SECRET=sua-chave-jwt-super-secreta-aqui-123456
+      - DATA_KEY=bW9kdWxlc3RyZWFtY29uZmlndXJhdGlvbnMxMjM0NTY=
     depends_on:
       migrate: {condition: service_completed_successfully}
       redis: {condition: service_healthy}
+
   worker:
     build: ./backend
-    env_file: ./backend/.env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://vagou:postgres@postgres:5432/vagou
+      - REDIS_URL=redis://redis:6379/0
+      - JWT_SECRET=sua-chave-jwt-super-secreta-aqui-123456
+      - DATA_KEY=bW9kdWxlc3RyZWFtY29uZmlndXJhdGlvbnMxMjM0NTY=
     command: [celery, -A, app.worker:celery, worker, --loglevel=INFO, --concurrency=2]
     depends_on:
       migrate: {condition: service_completed_successfully}
       redis: {condition: service_healthy}
+
   beat:
     build: ./backend
-    env_file: ./backend/.env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://vagou:postgres@postgres:5432/vagou
+      - REDIS_URL=redis://redis:6379/0
+      - JWT_SECRET=sua-chave-jwt-super-secreta-aqui-123456
+      - DATA_KEY=bW9kdWxlc3RyZWFtY29uZmlndXJhdGlvbnMxMjM0NTY=
     command: [celery, -A, app.worker:celery, beat, --loglevel=INFO, --schedule=/tmp/celerybeat-schedule]
     depends_on:
       migrate: {condition: service_completed_successfully}
       redis: {condition: service_healthy}
+
 volumes:
   pgdata:
   redisdata:

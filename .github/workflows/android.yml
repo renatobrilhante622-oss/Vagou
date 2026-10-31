@@ -76,7 +76,7 @@ jobs:
           flutter analyze
           flutter test
           (cd android && ./gradlew verifyAndroidSdkConfiguration)
-          flutter build apk --release --dart-define=API_BASE_URL=http://192.168.18.128:8000
+          flutter build apk --release --dart-define=API_BASE_URL=https://nest-gents-sudden.ngrok-free.dev
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4

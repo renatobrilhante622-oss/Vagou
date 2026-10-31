@@ -8,9 +8,9 @@ void main() {
   setUp(() { api = Api(); });
   tearDown(() { api.client.close(); });
 
-  test('preserves the configured LAN origin and API prefix', () {
+  test('preserves the configured HTTPS origin and API prefix', () {
     final uri = api.uri('/jobs?limit=20');
-    expect(uri.origin, 'http://192.168.18.128:8000');
+    expect(uri.origin, 'https://nest-gents-sudden.ngrok-free.dev');
     expect(uri.path, '/v1/jobs');
     expect(uri.queryParameters['limit'], '20');
   });

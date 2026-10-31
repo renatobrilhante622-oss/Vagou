@@ -79,7 +79,7 @@ O beat verifica fontes a cada 15 minutos e candidaturas elegíveis a cada minuto
 
 ## Android e download do APK
 
-Preservados: API local `http://192.168.18.128:8000`, `compileSdk=36`, `targetSdk=36`, `minSdk=24`, AGP 8.9.1, Gradle 8.11.1, Java 17, HTTP local autorizado e permissão Internet. O cliente permite HTTP somente na origem local configurada; o aparelho precisa conseguir alcançar essa rede local. Não há túnel nem mudança de infraestrutura implícitos.
+Preservados: endpoint atual `https://nest-gents-sudden.ngrok-free.dev` (workflow e padrão do cliente), acesso local opcional `http://192.168.18.128:8000`, `compileSdk=36`, `targetSdk=36`, `minSdk=24`, AGP 8.9.1, Gradle 8.11.1, Java 17, HTTP local autorizado e permissão Internet. O cliente usa o endpoint HTTPS atual por padrão. Se configurado para HTTP local, permite apenas a origem local indicada; nessa opção, o aparelho precisa alcançar a rede local. Não há túnel nem mudança de infraestrutura implícitos.
 
 O workflow usa Flutter 3.35.7, instala explicitamente API36 e `platform-tools` sem o pacote obsoleto `tools`, completa apenas arquivos Android ausentes e verifica os SDKs efetivos. Em seguida executa formatação, análise, testes Flutter e compilação. Recursos de ícone/splash próprios ficam versionados e não são sobrescritos pelo scaffold temporário.
 

@@ -15,7 +15,7 @@ class ApiException implements Exception {
 }
 
 class Api {
-  static const base = String.fromEnvironment('API_BASE_URL', defaultValue: 'http://192.168.18.128:8000');
+  static const base = String.fromEnvironment('API_BASE_URL', defaultValue: 'https://nest-gents-sudden.ngrok-free.dev');
   final storage = const FlutterSecureStorage();
   final client = http.Client();
   String? _token;

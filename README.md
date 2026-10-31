@@ -128,7 +128,7 @@ A média é das candidaturas registradas. Vagas em observação usam os critéri
 
 ## Android
 
-API local preservada: `http://192.168.18.128:8000`. SDK36/36/24, Java17, Gradle8.11.1 e AGP8.9.1 permanecem fixados. O workflow entrega um artifact com um APK; em tags `v*`, publica também um asset `.apk` direto em GitHub Releases. O download de artifacts do Actions é ZIP por regra do serviço. Leia as instruções de publicação/assinatura no guia: APK interno com assinatura de debug não é release pronto para Google Play.
+Endpoint atual preservado do remoto: `https://nest-gents-sudden.ngrok-free.dev`. O acesso local `http://192.168.18.128:8000` continua permitido quando configurado explicitamente. SDK36/36/24, Java17, Gradle8.11.1 e AGP8.9.1 permanecem fixados. O workflow entrega um artifact com um APK; em tags `v*`, publica também um asset `.apk` direto em GitHub Releases. O download de artifacts do Actions é ZIP por regra do serviço. Leia as instruções de publicação/assinatura no guia: APK interno com assinatura de debug não é release pronto para Google Play.
 
 ## Segurança e limites de validação
 
