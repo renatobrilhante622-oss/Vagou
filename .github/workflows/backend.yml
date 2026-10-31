@@ -1,0 +1,62 @@
+name: Backend
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: vagou
+          POSTGRES_PASSWORD: test-only-password
+          POSTGRES_DB: vagou
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U vagou -d vagou"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: postgresql+asyncpg://vagou:test-only-password@localhost:5432/vagou
+      REDIS_URL: redis://localhost:6379/0
+      STORAGE_DIR: /tmp/vagou-ci-storage
+      VAGOU_TEST_URL: http://127.0.0.1:8000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Generate ephemeral CI keys
+        run: |
+          python - <<'PY'
+          import os, secrets
+          from cryptography.fernet import Fernet
+          with open(os.environ['GITHUB_ENV'], 'a') as output:
+              output.write('JWT_SECRET=' + secrets.token_urlsafe(48) + '\n')
+              output.write('DATA_KEY=' + Fernet.generate_key().decode() + '\n')
+          PY
+      - run: alembic upgrade head
+      - name: Start API and run contracts
+        run: |
+          set -eu
+          uvicorn app.main:app --host 127.0.0.1 --port 8000 > /tmp/vagou-api.log 2>&1 &
+          api_pid=$!
+          trap 'kill "$api_pid" 2>/dev/null || true' EXIT
+          ready=0
+          for attempt in $(seq 1 30); do
+            if curl --silent --fail http://127.0.0.1:8000/health/ready; then ready=1; break; fi
+            sleep 1
+          done
+          if [ "$ready" != 1 ]; then cat /tmp/vagou-api.log; exit 1; fi
+          python -m unittest discover -s tests -v
+      - run: alembic check

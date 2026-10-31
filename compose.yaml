@@ -1,0 +1,53 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: vagou
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: vagou
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U vagou -d vagou']
+      interval: 5s
+      retries: 10
+  redis:
+    image: redis:7-alpine
+    command: [redis-server, --appendonly, 'yes']
+    volumes: [redisdata:/data]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      retries: 10
+  migrate:
+    build: ./backend
+    env_file: ./backend/.env
+    command: [alembic, upgrade, head]
+    depends_on:
+      postgres: {condition: service_healthy}
+  api:
+    build: ./backend
+    env_file: ./backend/.env
+    ports: ['127.0.0.1:8000:8000']
+    volumes: [resumes:/data/resumes]
+    environment: {STORAGE_DIR: /data/resumes}
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+  worker:
+    build: ./backend
+    env_file: ./backend/.env
+    command: [celery, -A, app.worker:celery, worker, --loglevel=INFO, --concurrency=2]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+  beat:
+    build: ./backend
+    env_file: ./backend/.env
+    command: [celery, -A, app.worker:celery, beat, --loglevel=INFO, --schedule=/tmp/celerybeat-schedule]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+volumes:
+  pgdata:
+  redisdata:
+  resumes:
