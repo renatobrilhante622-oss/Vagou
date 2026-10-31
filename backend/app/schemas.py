@@ -135,6 +135,53 @@ class Preferences(StrictModel):
         return value
 
 
+class AutomationRunReport(StrictModel):
+    id: UUID
+    status: Literal['queued', 'running', 'complete', 'failed', 'cancelled']
+    started_at: datetime
+    finished_at: datetime | None = None
+    collected_jobs: int = Field(default=0, ge=0)
+    scanned_jobs: int = Field(default=0, ge=0)
+    external_jobs_scanned: int = Field(default=0, ge=0)
+    filtered_jobs: int = Field(default=0, ge=0)
+    possible_match_jobs: int = Field(default=0, ge=0)
+    eligible_jobs: int = Field(default=0, ge=0)
+    submitted_applications: int = Field(default=0, ge=0)
+    manual_review_jobs: int = Field(default=0, ge=0)
+    error_count: int = Field(default=0, ge=0)
+    omitted_events: int = Field(default=0, ge=0)
+
+
+class AutomationRunsReport(StrictModel):
+    items: list[AutomationRunReport]
+    next_offset: int | None = None
+
+
+class AutomationRunStatusReport(AutomationRunReport):
+    progress: dict = Field(default_factory=dict)
+
+
+class AutomationEventReport(StrictModel):
+    id: UUID
+    job_id: UUID | None = None
+    job_title: str | None = None
+    job_url: str | None = None
+    status: Literal['submitted', 'already_applied', 'requires_manual', 'possible_match', 'missing_resume', 'filtered', 'failed']
+    detail: str
+    created_at: datetime
+    company: str | None = None
+    location: str | None = None
+    source_name: str | None = None
+    match_score: int | None = Field(default=None, ge=0, le=100)
+    match_reasons: list[str] = Field(default_factory=list)
+
+
+class AutomationEventsReport(StrictModel):
+    run: AutomationRunReport
+    items: list[AutomationEventReport]
+    next_offset: int | None = None
+
+
 class JobCreate(StrictModel):
     title: str = Field(min_length=2, max_length=160)
     company: str = Field(min_length=2, max_length=160)

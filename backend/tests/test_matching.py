@@ -1,6 +1,6 @@
 import unittest
 from types import SimpleNamespace
-from app.matching import eligible, filter_reason, match
+from app.matching import eligible, evaluate_job, filter_reason, match
 
 
 class MatchingTests(unittest.TestCase):
@@ -38,6 +38,21 @@ class MatchingTests(unittest.TestCase):
             contract_type='clt', salary_max=4000, modality='onsite', location='Recife / PE')
         self.assertEqual(filter_reason(job, {'min_salary': 5000}), 'Salário abaixo do piso definido.')
         self.assertEqual(filter_reason(job, {'keywords': ['Java']}), 'Palavras-chave não encontradas.')
+
+    def test_evaluate_job_returns_strong_possible_and_discarded_reasons(self):
+        job = SimpleNamespace(title='Analista Python', description='Python e SQL', keywords=['python', 'sql'],
+            salary_max=6000, modality='hybrid', location='Recife / PE', contract_type='clt')
+        preferences = {'titles': ['Analista'], 'keywords': ['python'], 'locations': ['Recife / PE'],
+            'modalities': ['hybrid'], 'min_salary': 5000, 'contract_types': ['clt']}
+        strong = evaluate_job(job, ['python', 'sql'], preferences)
+        possible = evaluate_job(job, ['python'], {**preferences, 'titles': ['Engenheiro'], 'locations': ['Brasília / DF']})
+        discarded = evaluate_job(job, [], {**preferences, 'titles': ['Engenheiro'], 'keywords': ['java'],
+            'locations': ['Brasília / DF'], 'modalities': ['onsite'], 'contract_types': ['pj'], 'min_salary': 10000})
+        self.assertEqual(strong['category'], 'strong')
+        self.assertEqual(strong['match_score'], 100)
+        self.assertEqual(possible['category'], 'possible')
+        self.assertTrue(any('Cidade/UF' in reason for reason in possible['missed_reasons']))
+        self.assertEqual(discarded['category'], 'discarded')
 
 
 if __name__ == '__main__':

@@ -1,6 +1,7 @@
 """Authenticated read-only execution reports for the candidate who owns them."""
 import asyncio
 from datetime import datetime, timezone
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -11,6 +12,7 @@ from app.automation_models import AutomationEvent, AutomationRun
 from app.db import session
 from app.models import User
 from app.premium import has_premium_access
+from app.schemas import AutomationEventsReport, AutomationRunStatusReport, AutomationRunsReport
 from app.security import role
 
 router = APIRouter(prefix='/v1/automation', tags=['Automação Premium'])
@@ -24,15 +26,18 @@ def premium(user: User):
 def event_view(event):
     return {'id': event.id, 'job_id': event.job_id, 'job_title': event.job_title,
             'job_url': event.job_url, 'status': event.status, 'detail': event.detail,
-            'created_at': event.created_at}
+            'created_at': event.created_at, 'company': event.company, 'location': event.location,
+            'source_name': event.source_name, 'match_score': event.match_score,
+            'match_reasons': event.match_reasons or []}
 
 
 def run_view(run):
     return {key: getattr(run, key) for key in ['id', 'status', 'started_at', 'finished_at',
-        'scanned_jobs', 'filtered_jobs', 'eligible_jobs', 'submitted_applications', 'manual_review_jobs', 'error_count', 'omitted_events']}
+        'collected_jobs', 'scanned_jobs', 'external_jobs_scanned', 'filtered_jobs', 'possible_match_jobs',
+        'eligible_jobs', 'submitted_applications', 'manual_review_jobs', 'error_count', 'omitted_events']}
 
 
-@router.get('/runs')
+@router.get('/runs', response_model=AutomationRunsReport)
 async def reports(offset: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=100),
                   user: User = Depends(role('candidate')), db: AsyncSession = Depends(session)):
     premium(user)
@@ -42,14 +47,18 @@ async def reports(offset: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=
     return {'items': [run_view(run) for run in runs], 'next_offset': offset + len(runs) if len(runs) == limit else None}
 
 
-@router.get('/runs/{run_id}/events')
+@router.get('/runs/{run_id}/events', response_model=AutomationEventsReport)
 async def report_events(run_id: UUID, offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100),
+                        status: Literal['submitted', 'already_applied', 'requires_manual', 'possible_match', 'missing_resume', 'filtered', 'failed'] | None = None,
                         user: User = Depends(role('candidate')), db: AsyncSession = Depends(session)):
     premium(user)
     run = await db.scalar(select(AutomationRun).where(AutomationRun.id == run_id, AutomationRun.candidate_id == user.id))
     if not run:
         raise HTTPException(404, 'Relatório não encontrado.')
-    events = list((await db.scalars(select(AutomationEvent).where(AutomationEvent.run_id == run.id)
+    query = select(AutomationEvent).where(AutomationEvent.run_id == run.id)
+    if status:
+        query = query.where(AutomationEvent.status == status)
+    events = list((await db.scalars(query
         .order_by(AutomationEvent.created_at, AutomationEvent.id).offset(offset).limit(limit))).all())
     return {'run': run_view(run), 'items': [event_view(event) for event in events],
             'next_offset': offset + len(events) if len(events) == limit else None}
@@ -67,7 +76,8 @@ async def enqueue_now(user: User = Depends(role('candidate')), db: AsyncSession 
     if not any(prefs.get(key) for key in ('modalities', 'titles', 'locations', 'contract_types', 'keywords', 'min_salary')):
         raise HTTPException(409, 'Configure ao menos um critério de busca antes de iniciar.')
     run = AutomationRun(candidate_id=user.id, status='queued', scanned_jobs=0, filtered_jobs=0,
-        eligible_jobs=0, submitted_applications=0, manual_review_jobs=0, error_count=0, omitted_events=0)
+        external_jobs_scanned=0, possible_match_jobs=0, eligible_jobs=0,
+        submitted_applications=0, manual_review_jobs=0, error_count=0, omitted_events=0)
     db.add(run)
     await db.commit()
     try:
@@ -83,7 +93,7 @@ async def enqueue_now(user: User = Depends(role('candidate')), db: AsyncSession 
     return {'status': 'queued', 'run_id': str(run.id), 'message': 'Busca iniciada. O progresso aparece aqui.'}
 
 
-@router.get('/runs/{run_id}/status')
+@router.get('/runs/{run_id}/status', response_model=AutomationRunStatusReport)
 async def run_status(run_id: UUID, user: User = Depends(role('candidate')), db: AsyncSession = Depends(session)):
     premium(user)
     run = await db.scalar(select(AutomationRun).where(AutomationRun.id == run_id,

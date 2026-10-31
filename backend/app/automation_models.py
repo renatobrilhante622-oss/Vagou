@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String, Text, Uuid, func
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, JSON, String, Text, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -15,8 +15,11 @@ class AutomationRun(Base):
     status: Mapped[str] = mapped_column(String(16), default='running')
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    collected_jobs: Mapped[int] = mapped_column(Integer, default=0)
     scanned_jobs: Mapped[int] = mapped_column(Integer, default=0)
+    external_jobs_scanned: Mapped[int] = mapped_column(Integer, default=0)
     filtered_jobs: Mapped[int] = mapped_column(Integer, default=0)
+    possible_match_jobs: Mapped[int] = mapped_column(Integer, default=0)
     eligible_jobs: Mapped[int] = mapped_column(Integer, default=0)
     submitted_applications: Mapped[int] = mapped_column(Integer, default=0)
     manual_review_jobs: Mapped[int] = mapped_column(Integer, default=0)
@@ -36,4 +39,9 @@ class AutomationEvent(Base):
     status: Mapped[str] = mapped_column(String(24))
     detail: Mapped[str] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    __table_args__ = (CheckConstraint("status IN ('submitted','already_applied','requires_manual','missing_resume','filtered','failed')", name='ck_automation_event_status'),)
+    company: Mapped[str | None] = mapped_column(String(160))
+    location: Mapped[str | None] = mapped_column(String(160))
+    source_name: Mapped[str | None] = mapped_column(String(120))
+    match_score: Mapped[int | None] = mapped_column(Integer)
+    match_reasons: Mapped[list | None] = mapped_column(JSON)
+    __table_args__ = (CheckConstraint("status IN ('submitted','already_applied','requires_manual','possible_match','missing_resume','filtered','failed')", name='ck_automation_event_status'),)

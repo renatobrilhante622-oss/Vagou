@@ -7,7 +7,6 @@ as a sent application. Jobs/user preferences are rechecked under database locks.
 import asyncio
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
-from urllib.parse import urlsplit
 
 from celery import Celery
 from sqlalchemy import func, or_, select
@@ -17,8 +16,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.automation_models import AutomationEvent, AutomationRun
 from app.config import settings
-from app.job_sources import FeedError, fetch_feed
-from app.matching import filter_reason, match
+from app.collectors import collect_authorized_sources
+from app.matching import evaluate_job
 from app.models import Job, User
 from app.premium import has_premium_access, premium_test_emails
 from app.services import apply
@@ -39,7 +38,7 @@ celery.conf.update(
 MAX_DETAILED_EVENTS_PER_RUN = 200
 
 
-def event(db, run, status, detail, job=None):
+def event(db, run, status, detail, job=None, evaluation=None):
     logged = getattr(run, '_logged_event_count', 0)
     if logged >= MAX_DETAILED_EVENTS_PER_RUN:
         run.omitted_events += 1
@@ -48,7 +47,11 @@ def event(db, run, status, detail, job=None):
     db.add(AutomationEvent(run_id=run.id, job_id=job.id if job else None,
         job_title=job.title if job else None,
         job_url=(job.source_url or f'/v1/jobs/{job.id}') if job else None,
-        status=status, detail=detail))
+        company=job.company if job else None, location=job.location if job else None,
+        source_name=job.source_name if job else None,
+        match_score=evaluation['match_score'] if evaluation else None,
+        match_reasons=evaluation['match_reasons'] + evaluation['missed_reasons'] if evaluation else None,
+        status=status, detail=detail[:255]))
 
 
 async def automate(candidate_id=None, force=False, run_id=None, progress=None):
@@ -57,7 +60,11 @@ async def automate(candidate_id=None, force=False, run_id=None, progress=None):
     engine = create_async_engine(settings().database_url, pool_pre_ping=True)
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     submitted = 0
+    collected_jobs = 0
     try:
+        if force:
+            collection = await refresh_job_sources()
+            collected_jobs = collection['collected_jobs']
         allowed_test_emails = premium_test_emails()
         cursor = None
         while True:
@@ -95,11 +102,15 @@ async def automate(candidate_id=None, force=False, run_id=None, progress=None):
                             continue
                         run = await db.get(AutomationRun, run_id) if run_id else None
                         if run is None:
-                            run = AutomationRun(candidate_id=user.id, scanned_jobs=0, filtered_jobs=0,
-                                eligible_jobs=0, submitted_applications=0, manual_review_jobs=0,
+                            run = AutomationRun(candidate_id=user.id, collected_jobs=collected_jobs,
+                                scanned_jobs=0, external_jobs_scanned=0,
+                                filtered_jobs=0, possible_match_jobs=0, eligible_jobs=0,
+                                submitted_applications=0, manual_review_jobs=0,
                                 error_count=0, omitted_events=0)
                             db.add(run)
                             await db.flush()
+                        else:
+                            run.collected_jobs = collected_jobs
                         run.status = 'running'
                         if not user.resume_key:
                             event(db, run, 'missing_resume', 'Envie um currículo PDF para ativar os envios automáticos.')
@@ -118,22 +129,25 @@ async def automate(candidate_id=None, force=False, run_id=None, progress=None):
                                 for job in jobs:
                                     run.scanned_jobs += 1
                                     if progress and run.scanned_jobs % 20 == 0:
-                                        progress({'scanned_jobs': run.scanned_jobs, 'filtered_jobs': run.filtered_jobs,
+                                        progress({'scanned_jobs': run.scanned_jobs, 'external_jobs_scanned': run.external_jobs_scanned,
+                                            'filtered_jobs': run.filtered_jobs, 'possible_match_jobs': run.possible_match_jobs,
                                             'eligible_jobs': run.eligible_jobs, 'submitted_applications': run.submitted_applications,
                                             'manual_review_jobs': run.manual_review_jobs})
-                                    reason = filter_reason(job, user.preferences or {})
-                                    if reason:
+                                    if job.recruiter_id is None:
+                                        run.external_jobs_scanned += 1
+                                    evaluation = evaluate_job(job, user.skills, preferences)
+                                    if evaluation['category'] == 'discarded':
                                         run.filtered_jobs += 1
-                                        event(db, run, 'filtered', reason, job)
+                                        event(db, run, 'filtered', '; '.join(evaluation['missed_reasons']) or 'Compatibilidade abaixo de 40%.', job, evaluation)
                                         continue
-                                    if match(user.skills, job.keywords)['category'] != 'high':
-                                        run.filtered_jobs += 1
-                                        event(db, run, 'filtered', 'Compatibilidade de requisitos abaixo do limite Premium.', job)
+                                    if evaluation['category'] == 'possible':
+                                        run.possible_match_jobs += 1
+                                        event(db, run, 'possible_match', '; '.join(evaluation['match_reasons'] + evaluation['missed_reasons']), job, evaluation)
                                         continue
                                     run.eligible_jobs += 1
                                     if job.recruiter_id is None:
                                         run.manual_review_jobs += 1
-                                        event(db, run, 'requires_manual', 'Vaga externa compatível. Confirme a candidatura no canal oficial.', job)
+                                        event(db, run, 'requires_manual', 'Vaga externa compatível. Revise e candidate-se no portal oficial.', job, evaluation)
                                         continue
                                     locked = await db.scalar(select(Job).where(Job.id == job.id, Job.active.is_(True),
                                         Job.moderation_status == 'approved').with_for_update())
@@ -142,14 +156,15 @@ async def automate(candidate_id=None, force=False, run_id=None, progress=None):
                                     _, created = await apply(db, user, locked, 'automatic')
                                     if created:
                                         run.submitted_applications += 1
-                                        event(db, run, 'submitted', 'Candidatura entregue ao recrutador dentro do Vagou!.', locked)
+                                        event(db, run, 'submitted', 'Candidatura entregue ao recrutador dentro do Vagou!.', locked, evaluation)
                                     else:
-                                        event(db, run, 'already_applied', 'Esta vaga já possui uma candidatura sua.', locked)
+                                        event(db, run, 'already_applied', 'Esta vaga já possui uma candidatura sua.', locked, evaluation)
                                     if run.submitted_applications >= limit:
                                         break
                                 job_cursor = jobs[-1].id
                                 if progress:
-                                    progress({'scanned_jobs': run.scanned_jobs, 'filtered_jobs': run.filtered_jobs,
+                                    progress({'scanned_jobs': run.scanned_jobs, 'external_jobs_scanned': run.external_jobs_scanned,
+                                        'filtered_jobs': run.filtered_jobs, 'possible_match_jobs': run.possible_match_jobs,
                                         'eligible_jobs': run.eligible_jobs, 'submitted_applications': run.submitted_applications,
                                         'manual_review_jobs': run.manual_review_jobs})
                         run.status = 'complete'
@@ -189,27 +204,27 @@ async def automate(candidate_id=None, force=False, run_id=None, progress=None):
 async def refresh_job_sources():
     cfg = settings()
     if not cfg.job_source_urls:
-        return {'imported': 0, 'failed_sources': 0, 'configured': False}
+        return {'imported': 0, 'collected_jobs': 0, 'failed_sources': 0, 'configured': False}
     engine = create_async_engine(cfg.database_url, pool_pre_ping=True)
     sessions = async_sessionmaker(engine, expire_on_commit=False)
-    imported, failed = 0, 0
+    imported = collected = 0
     try:
-        for url in cfg.job_source_urls:
-            try:
-                jobs = await fetch_feed(url, cfg.job_source_allowed_hosts, cfg.job_source_max_bytes, cfg.job_source_max_jobs)
-                source = urlsplit(url).hostname[:120]
-                source_imported = 0
-                async with sessions.begin() as db:
-                    for job in jobs:
-                        statement = insert(Job).values(**job.values(), source_name=source, recruiter_id=None,
-                            active=True, moderation_status='approved' if cfg.job_source_auto_approve else 'pending')
-                        result = await db.execute(statement.on_conflict_do_nothing(index_elements=['source_name', 'source_external_id']).returning(Job.id))
-                        source_imported += int(result.scalar_one_or_none() is not None)
-                imported += source_imported
-            except Exception:
-                # No URL query parameters, credentials or source response in logs.
-                failed += 1
-        return {'imported': imported, 'failed_sources': failed, 'configured': True}
+        sources, failed = await collect_authorized_sources(cfg.job_source_urls,
+            cfg.job_source_allowed_hosts, cfg.job_source_max_bytes, cfg.job_source_max_jobs)
+        for source in sources:
+            collected += len(source.jobs)
+            async with sessions.begin() as db:
+                for job in source.jobs:
+                    values = {**job.values(), 'source_name': source.name, 'recruiter_id': None,
+                        'active': True, 'moderation_status': 'approved' if cfg.job_source_auto_approve else 'pending'}
+                    statement = insert(Job).values(**values)
+                    updates = {key: getattr(statement.excluded, key) for key in (
+                        'title', 'company', 'description', 'location', 'modality', 'contract_type',
+                        'keywords', 'salary_min', 'salary_max', 'source_url')}
+                    result = await db.execute(statement.on_conflict_do_update(
+                        index_elements=['source_name', 'source_external_id'], set_=updates).returning(Job.id))
+                    imported += int(result.scalar_one_or_none() is not None)
+        return {'imported': imported, 'collected_jobs': collected, 'failed_sources': failed, 'configured': True}
     finally:
         await engine.dispose()
 

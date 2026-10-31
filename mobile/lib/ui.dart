@@ -83,7 +83,7 @@ Future<void> friendlyError(BuildContext context, Object error) => showDialog<voi
 String statusLabel(String status) => const {
   'submitted': 'Enviada', 'reviewing': 'Em análise', 'interview': 'Entrevista', 'rejected': 'Não selecionada', 'hired': 'Contratação',
   'pending': 'Aguardando aprovação', 'approved': 'Aprovada', 'queued': 'Na fila', 'complete': 'Concluída', 'completed': 'Concluída', 'running': 'Em andamento', 'failed': 'Não concluída', 'cancelled': 'Cancelada',
-  'already_applied': 'Já enviada', 'requires_manual': 'Requer sua avaliação', 'missing_resume': 'Currículo pendente', 'filtered': 'Descartada pelos filtros',
+  'already_applied': 'Já enviada', 'requires_manual': 'Encaminhada ao portal oficial', 'possible_match': 'Possível match', 'missing_resume': 'Currículo pendente', 'filtered': 'Descartada pelos filtros',
 }[status] ?? status;
 
 String formatDate(dynamic value) {

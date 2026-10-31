@@ -95,8 +95,10 @@ void main() {
       if (request.url.path == '/v1/automation/runs') return jsonResponse({'items': []});
       if (request.method == 'POST' && request.url.path == '/v1/automation/run') return jsonResponse({'run_id': runId});
       if (request.url.path == '/v1/automation/runs/$runId/status') {
-        return jsonResponse({'id': runId, 'status': 'complete', 'scanned_jobs': 8, 'filtered_jobs': 5,
-          'eligible_jobs': 3, 'submitted_applications': 2, 'manual_review_jobs': 1, 'progress': {}});
+        return jsonResponse({'id': runId, 'status': 'complete', 'collected_jobs': 12,
+          'scanned_jobs': 8, 'external_jobs_scanned': 4, 'filtered_jobs': 5,
+          'possible_match_jobs': 1, 'eligible_jobs': 3, 'submitted_applications': 2,
+          'manual_review_jobs': 1, 'progress': {}});
       }
       if (request.url.path == '/v1/automation/runs/$runId/events') return jsonResponse({'items': []});
       throw StateError('Unexpected request: ${request.method} ${request.url}');
@@ -114,7 +116,7 @@ void main() {
 
     expect(requests, contains('POST /v1/automation/run'));
     expect(requests, contains('GET /v1/automation/runs/$runId/status'));
-    expect(find.textContaining('8 analisadas · 5 descartadas · 3 compatíveis · 2 candidaturas · 1 para sua avaliação'), findsOneWidget);
+    expect(find.textContaining('12 coletadas · 8 analisadas (4 externas) · 2 enviadas · 1 possíveis · 5 descartadas'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 }

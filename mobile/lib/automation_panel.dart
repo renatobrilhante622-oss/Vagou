@@ -185,6 +185,46 @@ class _AutomationPanelState extends State<_AutomationPanel> {
 
   int _count(String key) => ((_progress[key] ?? _latestRun[key]) as num? ?? 0).toInt();
 
+  Future<void> _openEvent(Map event) async {
+    final link = event['job_url']?.toString();
+    final uri = link == null ? null : Uri.tryParse(link);
+    if (uri != null && ['http', 'https'].contains(uri.scheme)) {
+      try { await externalLink(link!); }
+      catch (error) { if (mounted) await friendlyError(context, error); }
+      return;
+    }
+    final id = event['job_id']?.toString();
+    if (id == null) return;
+    try {
+      final job = await widget.api.request('GET', '/jobs/$id');
+      if (!mounted) return;
+      await showModalBottomSheet<void>(context: context, showDragHandle: true,
+        isScrollControlled: true, builder: (context) => SafeArea(child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24), child: Column(mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('${job['title']}', style: Theme.of(context).textTheme.headlineSmall),
+              Text('${job['company']} · ${job['location']}'),
+              const SizedBox(height: 16), Text('${job['description']}'),
+            ]))));
+    } catch (error) { if (mounted) await friendlyError(context, error); }
+  }
+
+  Widget _eventCard(Map event) {
+    final reasons = List<String>.from(event['match_reasons'] as List? ?? const []);
+    return Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text('${event['job_title'] ?? 'Oportunidade'}', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+      Text('${event['company'] ?? 'Empresa não informada'} · ${event['location'] ?? 'Localização não informada'}'),
+      Wrap(spacing: 8, children: [
+        if (event['match_score'] != null) Chip(label: Text('${event['match_score']}% de compatibilidade')),
+        Chip(label: Text('${event['source_name'] ?? 'Vagou!'}')),
+        Chip(label: Text(statusLabel('${event['status']}'))),
+      ]),
+      if (reasons.isNotEmpty) Text(reasons.join(' · ')),
+      Text('${event['detail'] ?? ''}'),
+      TextButton.icon(onPressed: () => _openEvent(event), icon: const Icon(Icons.open_in_new), label: const Text('Candidatar-se / Abrir Vaga')),
+    ]));
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) return const SizedBox(height: 320, child: Center(child: CircularProgressIndicator()));
@@ -213,13 +253,18 @@ class _AutomationPanelState extends State<_AutomationPanel> {
           Text(statusLabel(active ? (_runStatus.isEmpty ? 'running' : _runStatus) : '${_latestRun['status'] ?? 'complete'}'), style: const TextStyle(fontWeight: FontWeight.w800)),
           if (active) ...[const SizedBox(height: 10), const LinearProgressIndicator()],
           const SizedBox(height: 12),
-          Text('${_count('scanned_jobs')} analisadas · ${_count('filtered_jobs')} descartadas · ${_count('eligible_jobs')} compatíveis · ${_count('submitted_applications')} candidaturas · ${_count('manual_review_jobs')} para sua avaliação'),
+          Text('${_count('collected_jobs')} coletadas · ${_count('scanned_jobs')} analisadas (${_count('external_jobs_scanned')} externas) · ${_count('submitted_applications')} enviadas · ${_count('possible_match_jobs')} possíveis · ${_count('filtered_jobs')} descartadas'),
         ])),
       ],
       if (_premium) ...[
-        const SectionTitle(title: 'Histórico e atividade'),
-        if (_events.isEmpty) const Panel(child: Text('Os resultados e motivos de descarte aparecerão aqui após a primeira varredura.')),
-        for (final event in _events.take(20)) Panel(child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [Icon(event['status'] == 'submitted' ? Icons.check_circle_outline : event['status'] == 'filtered' ? Icons.filter_alt_off_outlined : Icons.info_outline, color: event['status'] == 'submitted' ? Brand.teal : Brand.coral), const SizedBox(width: 10), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('${event['job_title'] ?? 'Oportunidade'}', style: const TextStyle(fontWeight: FontWeight.w700)), Text('${statusLabel('${event['status']}')} · ${event['detail'] ?? ''}'), Text(formatDate(event['created_at']), style: Theme.of(context).textTheme.bodySmall)]))])),
+        const SectionTitle(title: 'Vagas enviadas / encaminhadas'),
+        for (final event in _events.where((item) => ['submitted', 'requires_manual'].contains(item['status'])).take(20)) _eventCard(Map<String, dynamic>.from(event as Map)),
+        if (!_events.any((item) => ['submitted', 'requires_manual'].contains(item['status']))) const Panel(child: Text('Vagas enviadas ou encaminhadas aparecerão aqui.')),
+        const SectionTitle(title: 'Possíveis Matches (Próximas ao seu perfil)'),
+        for (final event in _events.where((item) => item['status'] == 'possible_match').take(20)) _eventCard(Map<String, dynamic>.from(event as Map)),
+        if (!_events.any((item) => item['status'] == 'possible_match')) const Panel(child: Text('Nenhuma vaga próxima ao perfil nesta execução.')),
+        const SectionTitle(title: 'Vagas descartadas'),
+        for (final event in _events.where((item) => item['status'] == 'filtered').take(20)) _eventCard(Map<String, dynamic>.from(event as Map)),
         if (_runs.length > 1) Text('Há ${_runs.length} execuções recentes; o histórico completo também fica em Relatórios.'),
       ],
     ]));

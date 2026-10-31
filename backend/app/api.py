@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.courses import COURSES
 from app.db import session
-from app.matching import eligible, match, normalize
+from app.matching import eligible, evaluate_job, match, normalize
 from app.models import Application, Job, User
 from app.premium import has_premium_access
 from app.schemas import DeleteAccount, JobCreate, JobOut, PublicJobOut, Preferences, ProfileUpdate, StatusUpdate
@@ -203,7 +203,16 @@ async def close_job(job_id: uuid.UUID, user: User = Recruiter, db: AsyncSession 
 async def matches(offset: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=100), user: User = Candidate, db: AsyncSession = DB):
     # Pagination is over active jobs examined; filters can make a page shorter.
     rows = (await db.scalars(select(Job).where(Job.active.is_(True), Job.moderation_status == 'approved').order_by(Job.created_at.desc(), Job.id).offset(offset).limit(limit))).all()
-    return {'items': [{'job': PublicJobOut.model_validate(j).model_dump(mode='json'), **match(user.skills, j.keywords)} for j in rows if eligible(j, user.preferences)], 'next_offset': offset + len(rows) if len(rows) == limit else None}
+    items = []
+    for job in rows:
+        if not eligible(job, user.preferences):
+            continue
+        skill_match = match(user.skills, job.keywords)
+        preference_match = evaluate_job(job, user.skills, user.preferences or {})
+        items.append({'job': PublicJobOut.model_validate(job).model_dump(mode='json'),
+            **skill_match, 'match_score': preference_match['match_score'],
+            'match_reasons': preference_match['match_reasons'] + preference_match['missed_reasons']})
+    return {'items': items, 'next_offset': offset + len(rows) if len(rows) == limit else None}
 
 
 @router.post('/jobs/{job_id}/applications')
