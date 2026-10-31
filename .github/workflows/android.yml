@@ -2,12 +2,16 @@ name: Build Android APK
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [main]
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build-apk:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: ./mobile
@@ -18,57 +22,54 @@ jobs:
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
+          distribution: temurin
           java-version: '17'
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: 'stable'
+          flutter-version: '3.35.7'
+          channel: stable
+          cache: true
 
-      - name: Generate Android Platform Files
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android API 36
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+
+      - name: Complete missing Android scaffold without replacing configuration
         run: |
-          flutter create --platforms=android --org br.com.vagou .
+          set -euo pipefail
+          scaffold="$RUNNER_TEMP/vagou-android-scaffold"
+          flutter create --no-pub --platforms=android --org br.com.vagou --project-name vagou "$scaffold"
+          rsync -a --ignore-existing "$scaffold/android/" android/
+          chmod +x android/gradlew
 
-      - name: Force SDK 36 and Cleartext Traffic
+      - name: Check Android SDK and HTTP configuration
         shell: python
         run: |
-          import pathlib, re
+          import pathlib
+          import re
+          import xml.etree.ElementTree as ET
 
-          # 1. Libera tráfego HTTP local no AndroidManifest.xml
-          manifest = pathlib.Path("android/app/src/main/AndroidManifest.xml")
-          if manifest.exists():
-              txt = manifest.read_text(encoding="utf-8")
-              if "usesCleartextTraffic" not in txt:
-                  txt = txt.replace("<application", '<application android:usesCleartextTraffic="true"', 1)
-                  manifest.write_text(txt, encoding="utf-8")
-
-          # 2. Força compileSdk = 36 e targetSdk = 36 em qualquer build.gradle ou build.gradle.kts
-          for p in pathlib.Path("android").rglob("build.gradle*"):
-              content = p.read_text(encoding="utf-8")
-              # Substitui referências antigas de compileSdk / compileSdkVersion para 36
-              content = re.sub(r'compileSdk\s*=?\s*[^\n]+', 'compileSdk = 36' if p.suffix == '.kts' else 'compileSdk 36', content)
-              content = re.sub(r'compileSdkVersion\s+[^\n]+', 'compileSdkVersion 36', content)
-              content = re.sub(r'targetSdk\s*=?\s*[^\n]+', 'targetSdk = 36' if p.suffix == '.kts' else 'targetSdk 36', content)
-              content = re.sub(r'targetSdkVersion\s+[^\n]+', 'targetSdkVersion 36', content)
-              content = re.sub(r'minSdk\s*=?\s*[^\n]+', 'minSdk = 24' if p.suffix == '.kts' else 'minSdk 24', content)
-              content = re.sub(r'minSdkVersion\s+[^\n]+', 'minSdkVersion 24', content)
-              p.write_text(content, encoding="utf-8")
-              print(f"Atualizado SDK para 36 em: {p}")
-
-          # 3. Garante propriedades no gradle.properties
-          props_path = pathlib.Path("android/gradle.properties")
-          if props_path.exists():
-              props = props_path.read_text(encoding="utf-8")
-          else:
-              props = ""
-          if "android.useAndroidX" not in props:
-              props += "\nandroid.useAndroidX=true\nandroid.enableJetifier=true\n"
-          props_path.write_text(props, encoding="utf-8")
+          app = pathlib.Path('android/app/build.gradle.kts').read_text()
+          for key, expected in [('compileSdk', 36), ('targetSdk', 36), ('minSdk', 24)]:
+              if not re.search(rf'^\s*{key}\s*=\s*{expected}\s*$', app, re.MULTILINE):
+                  raise SystemExit(f'{key} must be {expected}')
+          manifest = ET.parse('android/app/src/main/AndroidManifest.xml').getroot()
+          android = '{http://schemas.android.com/apk/res/android}'
+          application = manifest.find('application')
+          if application is None or application.get(android + 'usesCleartextTraffic') != 'true':
+              raise SystemExit('Local HTTP traffic must remain enabled')
+          if not any(p.get(android + 'name') == 'android.permission.INTERNET' for p in manifest.findall('uses-permission')):
+              raise SystemExit('INTERNET permission is required')
 
       - name: Install dependencies and build APK
         run: |
+          set -euo pipefail
           flutter pub get
+          (cd android && ./gradlew verifyAndroidSdkConfiguration)
           flutter build apk --release --dart-define=API_BASE_URL=http://192.168.18.128:8000
 
       - name: Upload APK Artifact
@@ -76,3 +77,4 @@ jobs:
         with:
           name: vagou-release-apk
           path: mobile/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
