@@ -88,7 +88,7 @@ O workflow usa Flutter 3.35.7, instala explicitamente API36 e `platform-tools` s
 - Em commits da `main`: `Actions → Build Android APK → execução → Artifacts → vagou-release-apk`. O GitHub empacota esse download como ZIP mesmo contendo um único APK; `compression-level: 0` evita compressão desnecessária.
 - Em tags `v*`: após build bem-sucedido, o job `publish-apk` publica `app-release.apk` como asset de uma GitHub Release, permitindo download direto do APK. O token tem escrita apenas nesse job. Crie a tag somente quando desejar publicar a versão. Se a release já existir, revise a execução e publique o asset conscientemente; o comando não sobrescreve releases antigas automaticamente.
 
-O APK interno mantém a assinatura de debug usada no template anterior. Para Google Play é obrigatória assinatura de produção/Play App Signing e configuração de release própria; isso não é inventado nesta atualização. O SDK de Flutter/Android não está instalado nesta máquina e o proxy impede sua instalação; o build efetivo depende da execução do workflow.
+O APK interno mantém a assinatura de debug usada no template anterior. Para Google Play é obrigatória assinatura de produção/Play App Signing e configuração de release própria; isso não é inventado nesta atualização. A análise e os testes Flutter podem ser executados nesta máquina com o SDK fixado; a compilação Android completa é confirmada pelo workflow.
 
 ## Testes
 
@@ -138,3 +138,39 @@ DEBUG_VERIFICATION_CODES=true
 Se a entrega imediata falhar ou o SMTP não estiver configurado, o processo da **API**, depois do commit do cadastro, escreve `DEBUG VERIFICATION CODE: ` seguido dos seis dígitos nos logs. Consulte `docker compose -f compose.yaml -f compose.smtp.yaml logs api` em um terminal privado. O mesmo vale para um reenvio efetivamente agendado. A conta permanece pendente até confirmar o código; não há bypass de autenticação.
 
 Esse recurso é falso por padrão e permanece inativo com `APP_ENV=production`, mesmo que o flag esteja ligado. Ao terminar os testes, use `APP_ENV=production` e `DEBUG_VERIFICATION_CODES=false` e recrie os serviços. Evite compartilhar logs de teste, pois eles passam a conter códigos de acesso. Nenhum código real deve ser publicado em issues ou no Git.
+
+## Plano Premium e automação: acesso efetivo
+
+`GET /v1/me` mantém `is_premium` e acrescenta `entitlements`:
+
+```json
+{"is_premium":false,"entitlements":{"plan":"test","can_automate":true,"is_test_access":true,"reason":"available"}}
+```
+
+Esse exemplo só é possível para uma conta verificada autorizada em ambiente de desenvolvimento/teste. A UI usa `can_automate` da API, atualiza a conta ao retornar ao app/abrir perfil ou relatórios e permite atualizar manualmente sem perder formulários em edição. O plano não é uma permissão congelada no JWT: API e worker consultam o estado atual no servidor.
+
+### Contas de teste
+
+No arquivo privado de configuração do servidor, use `APP_ENV=development` ou `APP_ENV=test` e `PREMIUM_TEST_EMAILS` como lista JSON dos endereços explicitamente autorizados. A lista padrão é vazia. Reinicie API e worker ao mudar configuração. Em `APP_ENV=production`, a lista de teste é ignorada. Não existe concessão automática a todas as contas e não se aceita `is_premium` enviado pelo cliente.
+
+### Assinaturas e concessão pelo operador
+
+O campo `is_premium` existente continua sendo a fonte de assinatura ativa. Enquanto não houver integração de cobrança, um operador autorizado com acesso ao servidor pode conceder ou revogar explicitamente o plano:
+
+```bash
+docker compose exec api python -m app.manage_premium --email candidato@example.com --grant
+docker compose exec api python -m app.manage_premium --email candidato@example.com --revoke
+```
+
+Use o e-mail real da conta desejada; os endereços acima são exemplos. O comando exige conta existente de candidato, é idempotente e não cria conta fictícia. Revogar também desativa o consentimento de automação para novos ciclos. Conceder o plano não ativa consentimento e não elimina a confirmação de e-mail. Isso não processa pagamentos nem comprova uma assinatura em provedor externo. Nenhum endpoint público permite autopromoção.
+
+### Fluxo do envio automático
+
+1. Confirme o e-mail, envie currículo, declare competências e salve cargo, modalidade, cidade/UF quando presencial/híbrido e faixa salarial. A automação exige autorização explícita.
+2. O salário máximo desejado é opcional (`max_salary=null` remove esse filtro). A faixa da vaga deve sobrepor a faixa desejada. A localização aceita cidade/UF com barra, vírgula ou hífen separado; UF e acentos são normalizados. Remoto continua ignorando cidade.
+3. O botão **Iniciar busca agora** usa `POST /v1/automation/run`, sem payload de candidato ou permissões. A API agenda exclusivamente o usuário autenticado com `force=true`; não inicia todos os usuários. Solicitações repetidas em 30 segundos são deduplicadas. Erros de pré-requisitos são 409 com código orientativo, não falso erro de cadastro duplicado.
+4. A execução imediata ultrapassa apenas o intervalo agendado, nunca confirmação, Premium, consentimento, currículo, aprovação da vaga, filtros ou limites de candidatura. O beat continua respeitando a frequência escolhida.
+5. O worker percorre todas as páginas de vagas ativas aprovadas e aplica a compatibilidade alta (>75%). Atingir o teto interrompe apenas novos envios, não a análise das páginas seguintes. Há prefetch das candidaturas existentes por página e unicidade por candidato/vaga.
+6. Os eventos distinguem envio, candidatura já existente, vaga externa manual, currículo/critério ausente e `limit_reached` (vaga compatível adiada pelo teto). A UI mostra os motivos no histórico; até 200 eventos detalhados por ciclo, com totais e `omitted_events` explícitos. Vagas pendentes/reprovadas/encerradas não recebem envios.
+
+Aplique `alembic upgrade head` (agora até `0006`) antes de reiniciar a API/worker. O teste integrado inicia um worker Celery real e comprova o trajeto HTTP → Redis → Celery → PostgreSQL; testes de paginação usam mais de 200 vagas. Isso não representa envio automático a portais externos sem uma API autorizada: esses anúncios continuam exigindo ação manual no canal oficial.

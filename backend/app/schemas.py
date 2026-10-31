@@ -98,6 +98,7 @@ class ProfileUpdate(Skills):
 class Preferences(StrictModel):
     titles: list[str] = Field(default_factory=list, max_length=20)
     min_salary: float = Field(default=0, ge=0, le=1000000, allow_inf_nan=False)
+    max_salary: float | None = Field(default=None, ge=0, le=1000000, allow_inf_nan=False)
     modalities: list[Modality] = Field(default_factory=list, max_length=3)
     locations: list[str] = Field(default_factory=list, max_length=20)
     completed_course_ids: list[str] = Field(default_factory=list, max_length=50)
@@ -107,6 +108,8 @@ class Preferences(StrictModel):
 
     @model_validator(mode='after')
     def onsite_location_required(self):
+        if self.max_salary is not None and self.max_salary < self.min_salary:
+            raise ValueError('A pretensão máxima deve ser maior ou igual à mínima.')
         if any(modality in ['onsite', 'hybrid'] for modality in self.modalities) and not self.locations:
             raise ValueError('Informe a cidade e o estado para vagas presenciais ou híbridas.')
         return self

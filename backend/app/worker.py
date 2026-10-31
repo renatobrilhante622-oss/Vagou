@@ -7,6 +7,7 @@ as a sent application. Jobs/user preferences are rechecked under database locks.
 import asyncio
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
+from uuid import UUID
 
 from celery import Celery
 from sqlalchemy import select
@@ -18,7 +19,8 @@ from app.automation_models import AutomationEvent, AutomationRun
 from app.config import settings
 from app.job_sources import FeedError, fetch_feed
 from app.matching import eligible, match
-from app.models import Job, User
+from app.models import Application, Job, User
+from app.entitlements import can_automate, premium_filter
 from app.services import apply
 
 celery = Celery('vagou', broker=settings().redis_url)
@@ -49,7 +51,10 @@ def event(db, run, status, detail, job=None):
         status=status, detail=detail))
 
 
-async def automate():
+async def automate(candidate_id: str | UUID | None = None, force: bool = False):
+    target = UUID(str(candidate_id)) if candidate_id is not None else None
+    if force and target is None:
+        raise ValueError('Immediate automation must target a single candidate')
     engine = create_async_engine(settings().database_url, pool_pre_ping=True)
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     submitted = 0
@@ -58,7 +63,9 @@ async def automate():
         while True:
             async with sessions() as db:
                 query = select(User.id).where(User.role == 'candidate', User.email_verified.is_(True),
-                    User.is_premium.is_(True), User.automation_enabled.is_(True)).order_by(User.id).limit(100)
+                    premium_filter(), User.automation_enabled.is_(True)).order_by(User.id).limit(100)
+                if target is not None:
+                    query = query.where(User.id == target)
                 if cursor:
                     query = query.where(User.id > cursor)
                 ids = list((await db.scalars(query)).all())
@@ -68,40 +75,53 @@ async def automate():
                 try:
                     async with sessions.begin() as db:
                         user = await db.scalar(select(User).where(User.id == user_id).with_for_update(skip_locked=True))
-                        if not user or not user.email_verified or not user.is_premium or not user.automation_enabled:
+                        if not user or user.role != 'candidate' or not user.email_verified or not can_automate(user) or not user.automation_enabled:
                             continue
-                        configured_interval = user.preferences.get('automation_interval_minutes', 60)
+                        preferences = user.preferences or {}
+                        configured_interval = preferences.get('automation_interval_minutes', 60)
                         interval = max(15, min(1440, configured_interval)) if isinstance(configured_interval, int) else 60
                         latest = await db.scalar(select(AutomationRun.started_at).where(AutomationRun.candidate_id == user.id)
                             .order_by(AutomationRun.started_at.desc()).limit(1))
-                        if latest and latest > datetime.now(timezone.utc) - timedelta(minutes=interval):
+                        if not force and latest and latest > datetime.now(timezone.utc) - timedelta(minutes=interval):
                             continue
                         run = AutomationRun(candidate_id=user.id, scanned_jobs=0, eligible_jobs=0,
                             submitted_applications=0, manual_review_jobs=0, error_count=0, omitted_events=0)
                         db.add(run)
                         await db.flush()
-                        if not user.resume_key:
+                        if not preferences.get('titles') or not preferences.get('modalities'):
+                            event(db, run, 'criteria_missing', 'Salve os cargos e modalidades de interesse antes de iniciar os envios.')
+                        elif not user.resume_key:
                             event(db, run, 'missing_resume', 'Envie um currículo PDF para ativar os envios automáticos.')
                         else:
                             job_cursor = None
                             configured_limit = settings().automation_max_applications_per_run
-                            requested_limit = user.preferences.get('automation_max_applications_per_run', configured_limit)
+                            requested_limit = preferences.get('automation_max_applications_per_run', configured_limit)
                             limit = min(configured_limit, requested_limit) if isinstance(requested_limit, int) and requested_limit > 0 else configured_limit
-                            while run.submitted_applications < limit:
+                            while True:
                                 query = select(Job).where(Job.active.is_(True), Job.moderation_status == 'approved').order_by(Job.id).limit(200)
                                 if job_cursor:
                                     query = query.where(Job.id > job_cursor)
                                 jobs = list((await db.scalars(query)).all())
                                 if not jobs:
                                     break
+                                applied_ids = set((await db.scalars(select(Application.job_id).where(
+                                    Application.candidate_id == user.id,
+                                    Application.job_id.in_([job.id for job in jobs]),
+                                ))).all())
                                 for job in jobs:
                                     run.scanned_jobs += 1
-                                    if not eligible(job, user.preferences) or match(user.skills, job.keywords)['category'] != 'high':
+                                    if not eligible(job, preferences) or match(user.skills, job.keywords)['category'] != 'high':
                                         continue
                                     run.eligible_jobs += 1
                                     if job.recruiter_id is None:
                                         run.manual_review_jobs += 1
                                         event(db, run, 'requires_manual', 'Vaga externa compatível. Confirme a candidatura no canal oficial.', job)
+                                        continue
+                                    if job.id in applied_ids:
+                                        event(db, run, 'already_applied', 'Esta vaga já possui uma candidatura sua.', job)
+                                        continue
+                                    if run.submitted_applications >= limit:
+                                        event(db, run, 'limit_reached', 'Vaga compatível. O limite de envios deste ciclo foi atingido.', job)
                                         continue
                                     locked = await db.scalar(select(Job).where(Job.id == job.id, Job.active.is_(True),
                                         Job.moderation_status == 'approved').with_for_update())
@@ -113,8 +133,6 @@ async def automate():
                                         event(db, run, 'submitted', 'Candidatura entregue ao recrutador dentro do Vagou!.', locked)
                                     else:
                                         event(db, run, 'already_applied', 'Esta vaga já possui uma candidatura sua.', locked)
-                                    if run.submitted_applications >= limit:
-                                        break
                                 job_cursor = jobs[-1].id
                         run.status = 'complete'
                         run.finished_at = datetime.now(timezone.utc)
@@ -167,8 +185,8 @@ async def refresh_job_sources():
 
 
 @celery.task(name='vagou.automate', autoretry_for=(ConnectionError, OperationalError), retry_backoff=True, max_retries=3)
-def run_automation():
-    return asyncio.run(automate())
+def run_automation(candidate_id: str | None = None, force: bool = False):
+    return asyncio.run(automate(candidate_id=candidate_id, force=force))
 
 
 @celery.task(name='vagou.refresh_job_sources', autoretry_for=(OperationalError,), retry_backoff=True, max_retries=3)

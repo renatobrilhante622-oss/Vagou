@@ -35,4 +35,4 @@ class AutomationEvent(Base):
     status: Mapped[str] = mapped_column(String(24))
     detail: Mapped[str] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    __table_args__ = (CheckConstraint("status IN ('submitted','already_applied','requires_manual','missing_resume','failed')", name='ck_automation_event_status'),)
+    __table_args__ = (CheckConstraint("status IN ('submitted','already_applied','requires_manual','missing_resume','failed','limit_reached','criteria_missing')", name='ck_automation_event_status'),)

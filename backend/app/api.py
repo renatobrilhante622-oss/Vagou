@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.entitlements import can_automate, entitlement_view
 from app.courses import COURSES
 from app.db import session
 from app.matching import eligible, match, normalize
@@ -27,7 +28,7 @@ DB = Depends(session)
 
 def account_view(user):
     return {'id': user.id, 'email': user.email, 'name': user.name, 'role': user.role, 'skills': user.skills,
-            'is_premium': user.is_premium, 'automation_enabled': user.automation_enabled,
+            'is_premium': user.is_premium, 'entitlements': entitlement_view(user), 'automation_enabled': user.automation_enabled,
             'has_resume': bool(user.resume_key), 'preferences': user.preferences or {},
             'phone': cipher().decrypt(user.phone_encrypted.encode()).decode() if user.phone_encrypted else None,
             'email_verified': user.email_verified, 'company_cnpj': user.company_cnpj,
@@ -52,15 +53,18 @@ async def profile(payload: ProfileUpdate, user: User = Candidate, db: AsyncSessi
 
 @router.put('/me/preferences')
 async def preferences(payload: Preferences, user: User = Candidate, db: AsyncSession = DB):
-    if payload.automation_enabled and not user.is_premium:
-        raise HTTPException(403, 'Premium subscription required')
+    if payload.automation_enabled and not can_automate(user):
+        raise HTTPException(403, {'code': 'premium_required', 'message': 'Esta funcionalidade exige plano Premium ou acesso de teste autorizado.'})
+    if payload.automation_enabled and (not payload.titles or not payload.modalities):
+        raise HTTPException(409, {'code': 'preferences_required', 'message': 'Selecione os cargos e modalidades antes de ativar os envios.'})
     updated_preferences = payload.model_dump(exclude={'automation_enabled'})
     if 'completed_course_ids' not in payload.model_fields_set:
         updated_preferences['completed_course_ids'] = (user.preferences or {}).get('completed_course_ids', [])
     user.preferences = updated_preferences
     user.automation_enabled = payload.automation_enabled
     await db.commit()
-    return {**user.preferences, 'automation_enabled': user.automation_enabled}
+    return {**user.preferences, 'automation_enabled': user.automation_enabled,
+            'entitlements': entitlement_view(user)}
 
 
 @router.post('/me/courses/{course_id}')

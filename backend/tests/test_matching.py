@@ -30,3 +30,33 @@ class MatchingTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class AdvancedPreferenceFilters(unittest.TestCase):
+    def job(self, **changes):
+        data = {'title': 'Desenvolvedor Python', 'salary_min': 4000, 'salary_max': 7000,
+                'modality': 'onsite', 'location': 'São Paulo / SP'}
+        return SimpleNamespace(**{**data, **changes})
+
+    def test_location_mask_accents_state_and_hyphenated_city(self):
+        prefs = {'locations': ['sao paulo, SP']}
+        for location in ['São Paulo / SP', 'SÃO PAULO, SP', 'São Paulo - São Paulo', 'São Paulo SP']:
+            with self.subTest(location=location):
+                self.assertTrue(eligible(self.job(location=location), prefs))
+        self.assertFalse(eligible(self.job(location='São Paulo / PR'), prefs))
+        self.assertFalse(eligible(self.job(location='São Paulo'), prefs))
+        self.assertTrue(eligible(self.job(location='São Paulo / SP'), {'locations': ['São Paulo']}))
+        self.assertTrue(eligible(self.job(location='Pindaré-Mirim - MA'), {'locations': ['Pindaré-Mirim / MA']}))
+
+    def test_salary_interval_overlap_inclusive_and_unknown_salary(self):
+        self.assertTrue(eligible(self.job(), {'min_salary': 7000, 'max_salary': 8000}))
+        self.assertTrue(eligible(self.job(), {'min_salary': 2000, 'max_salary': 4000}))
+        self.assertFalse(eligible(self.job(), {'min_salary': 7001}))
+        self.assertFalse(eligible(self.job(), {'max_salary': 3999}))
+        self.assertFalse(eligible(self.job(salary_min=0, salary_max=0), {'min_salary': 1}))
+
+    def test_remote_ignores_city_but_title_and_modality_still_apply(self):
+        prefs = {'locations': ['Recife / PE'], 'titles': ['  desenvolvedor   python '],
+                 'modalities': ['remote'], 'min_salary': 4000, 'max_salary': 8000}
+        self.assertTrue(eligible(self.job(modality='remote'), prefs))
+        self.assertFalse(eligible(self.job(modality='hybrid'), prefs))
+        self.assertFalse(eligible(self.job(modality='remote', title='Engenheiro Java'), prefs))

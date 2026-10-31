@@ -21,7 +21,7 @@ backend/
     models.py / schemas.py  # persistência e contratos Pydantic v2
     security.py / passwords.py / matching.py / services.py / db.py / config.py
     courses.py              # referências oficiais com objetivos e contexto profissional
-  alembic/versions/          # migrações 0001 → 0002 → 0003
+  alembic/versions/          # migrações 0001 → 0006
   tests/
   .env.example / Dockerfile / requirements.txt
 mobile/
@@ -136,4 +136,4 @@ A implementação não constitui certificação LGPD/Google Play nem garantia de
 
 Produção exige TLS, banco/volumes/backups criptografados, chaves em cofre, rede privada, observabilidade, revisão de segurança e assinatura Android própria. HTTP local foi mantido por requisito do ambiente de desenvolvimento. PDFs são limitados, criptografados e privados, mas parsing não substitui antivírus/CDR: integrar scanner isolado e reconciliação de arquivos órfãos. Banco e filesystem não compartilham transação. Os relatórios exigem política de retenção; o worker faz varredura paginada, ainda sem índice de matching materializado para catálogos muito grandes.
 
-Os testes diferenciam execução real e casos ignorados. Esta máquina não tem SQLAlchemy/Celery/Flutter disponíveis, e o proxy impede instalar dependências; por isso os testes integrados, entrega Gmail real e geração de APK dependem de ambiente configurado/CI. Consulte os resultados da tarefa e o workflow; não trate verificação de sintaxe como prova de funcionamento integrado.
+Os testes diferenciam execução real e casos ignorados. Esta máquina permite executar a suíte integrada com PostgreSQL/Redis/Celery e os testes Flutter após instalar as ferramentas; a entrega Gmail real depende da rede SMTP e das credenciais e a geração de APK é verificada no CI. Consulte os resultados da tarefa e o workflow; não trate verificação de sintaxe como prova de funcionamento integrado.

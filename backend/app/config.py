@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     )
     environment: Literal['development', 'test', 'production'] = Field(default='production', validation_alias=AliasChoices('APP_ENV', 'environment'))
     debug_verification_codes: bool = False
+    premium_test_emails: list[str] = Field(default_factory=list)
     database_url: str = 'postgresql+asyncpg://vagou:vagou@localhost:5432/vagou'
     jwt_secret: SecretStr
     data_key: SecretStr

@@ -1,13 +1,14 @@
 """Authenticated read-only execution reports for the candidate who owns them."""
 import asyncio
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.automation_models import AutomationEvent, AutomationRun
 from app.db import session
+from app.entitlements import can_automate
 from app.models import User
 from app.security import role
 
@@ -15,8 +16,8 @@ router = APIRouter(prefix='/v1/automation', tags=['Automação Premium'])
 
 
 def premium(user: User):
-    if not user.is_premium:
-        raise HTTPException(403, 'Esta funcionalidade exige uma assinatura Premium.')
+    if not can_automate(user):
+        raise HTTPException(403, {'code': 'premium_required', 'message': 'Esta funcionalidade exige plano Premium ou acesso de teste autorizado.'})
 
 
 def event_view(event):
@@ -54,19 +55,33 @@ async def report_events(run_id: UUID, offset: int = Query(0, ge=0), limit: int =
 
 
 @router.post('/run', status_code=202)
-async def enqueue_now(user: User = Depends(role('candidate'))):
+async def enqueue_now(request: Request, user: User = Depends(role('candidate'))):
     """Request an immediate cycle; server state is authoritative for Premium."""
     premium(user)
     if not user.automation_enabled:
-        raise HTTPException(409, 'Ative e salve suas preferências de envio automático primeiro.')
+        raise HTTPException(409, {'code': 'automation_disabled', 'message': 'Ative e salve suas preferências de envio automático primeiro.'})
     if not user.resume_key:
-        raise HTTPException(409, 'Envie seu currículo PDF antes de iniciar os envios.')
+        raise HTTPException(409, {'code': 'resume_required', 'message': 'Envie seu currículo PDF antes de iniciar os envios.'})
     prefs = user.preferences or {}
     if not prefs.get('titles') or not prefs.get('modalities'):
-        raise HTTPException(422, 'Configure os cargos e modalidades de interesse antes de iniciar.')
+        raise HTTPException(409, {'code': 'preferences_required', 'message': 'Configure os cargos e modalidades de interesse antes de iniciar.'})
+    marker = str(uuid4())
+    key = f'automation:dispatch:{user.id}'
+    redis = request.app.state.redis
     try:
+        acquired = await redis.set(key, marker, ex=30, nx=True)
+        if not acquired:
+            return {'status': 'queued', 'deduplicated': True,
+                    'message': 'Sua busca já foi solicitada. Acompanhe os relatórios.'}
         from app.worker import run_automation
-        await asyncio.to_thread(run_automation.delay)
+        await asyncio.to_thread(run_automation.apply_async, args=[str(user.id)],
+                                kwargs={'force': True}, task_id=marker)
     except Exception:
+        # Release only our own reservation; never remove a later request's lock.
+        try:
+            await redis.eval("if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end", 1, key, marker)
+        except Exception:
+            pass
         raise HTTPException(503, 'Não foi possível agendar a busca agora. O serviço tentará novamente no próximo ciclo.') from None
-    return {'status': 'queued', 'message': 'Busca agendada. Acompanhe os resultados em Relatórios.'}
+    return {'status': 'queued', 'task_id': marker, 'deduplicated': False,
+            'message': 'Busca agendada para sua conta. Acompanhe os resultados em Relatórios.'}
