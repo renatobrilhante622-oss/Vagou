@@ -28,12 +28,12 @@ DB = Depends(session)
 def account_view(user):
     return {'id': user.id, 'email': user.email, 'name': user.name, 'role': user.role, 'skills': user.skills,
             'is_premium': user.is_premium, 'automation_enabled': user.automation_enabled,
-            'has_resume': bool(user.resume_key), 'preferences': user.preferences,
+            'has_resume': bool(user.resume_key), 'preferences': user.preferences or {},
             'phone': cipher().decrypt(user.phone_encrypted.encode()).decode() if user.phone_encrypted else None,
             'email_verified': user.email_verified, 'company_cnpj': user.company_cnpj,
             'company_name': user.company_name, 'company_contact_email': user.company_contact_email,
             'profile_completion': round(100 * sum([bool(user.name), bool(user.skills),
-                bool(user.phone_encrypted), bool(user.resume_key), bool(user.preferences.get('titles'))]) / 5)}
+                bool(user.phone_encrypted), bool(user.resume_key), bool((user.preferences or {}).get('titles'))]) / 5)}
 
 
 @router.get('/me')
@@ -54,10 +54,27 @@ async def profile(payload: ProfileUpdate, user: User = Candidate, db: AsyncSessi
 async def preferences(payload: Preferences, user: User = Candidate, db: AsyncSession = DB):
     if payload.automation_enabled and not user.is_premium:
         raise HTTPException(403, 'Premium subscription required')
-    user.preferences = payload.model_dump(exclude={'automation_enabled'})
+    updated_preferences = payload.model_dump(exclude={'automation_enabled'})
+    if 'completed_course_ids' not in payload.model_fields_set:
+        updated_preferences['completed_course_ids'] = (user.preferences or {}).get('completed_course_ids', [])
+    user.preferences = updated_preferences
     user.automation_enabled = payload.automation_enabled
     await db.commit()
     return {**user.preferences, 'automation_enabled': user.automation_enabled}
+
+
+@router.post('/me/courses/{course_id}')
+async def declare_course_completion(course_id: str, user: User = Candidate, db: AsyncSession = DB):
+    if course_id not in {course['id'] for course in COURSES}:
+        raise HTTPException(404, 'Curso não encontrado no catálogo.')
+    current = dict(user.preferences or {})
+    completed = list(current.get('completed_course_ids') or [])
+    if course_id not in completed:
+        completed.append(course_id)
+    current['completed_course_ids'] = completed
+    user.preferences = current
+    await db.commit()
+    return {'completed_course_ids': completed, 'declaration': 'Informação declarada pelo candidato, sem verificação da instituição.'}
 
 
 @router.delete('/me', status_code=204)
