@@ -32,7 +32,7 @@ async def current_user(credentials: HTTPAuthorizationCredentials | None = Depend
         cfg = settings()
         claims = jwt.decode(credentials.credentials, cfg.jwt_secret.get_secret_value(), algorithms=['HS256'], issuer=cfg.issuer, audience=cfg.audience, options={'require': ['sub', 'exp', 'iat', 'ver', 'jti']})
         user = await db.get(User, UUID(claims['sub']))
-        if not user or user.token_version != claims['ver']:
+        if not user or not user.email_verified or user.token_version != claims['ver']:
             raise ValueError
         return user
     except (jwt.PyJWTError, ValueError, KeyError, TypeError):

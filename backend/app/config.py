@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from cryptography.fernet import Fernet
 from pydantic import Field, SecretStr, model_validator
@@ -19,6 +20,23 @@ class Settings(BaseSettings):
     allowed_origins: list[str] = []
     max_pdf_bytes: int = 5 * 1024 * 1024
     privacy_version: str = '2026-01'
+    smtp_host: str = ''
+    smtp_port: int = Field(default=587, ge=1, le=65535)
+    smtp_username: str = ''
+    smtp_password: SecretStr | None = None
+    smtp_from: str = ''
+    smtp_security: Literal['starttls', 'ssl'] = 'starttls'
+    smtp_timeout_seconds: int = Field(default=15, ge=1, le=60)
+    moderator_emails: list[str] = []
+    job_source_auto_approve: bool = False
+    job_source_urls: list[str] = []
+    job_source_allowed_hosts: list[str] = []
+    job_source_max_bytes: int = Field(default=2 * 1024 * 1024, ge=1024, le=10 * 1024 * 1024)
+    job_source_max_jobs: int = Field(default=200, ge=1, le=1000)
+    automation_max_applications_per_run: int = Field(default=20, ge=1, le=100)
+    verification_expiry_minutes: int = Field(default=10, ge=5, le=30)
+    verification_max_attempts: int = Field(default=5, ge=3, le=10)
+    verification_resend_seconds: int = Field(default=60, ge=30, le=3600)
 
     @model_validator(mode='after')
     def validate_keys(self):

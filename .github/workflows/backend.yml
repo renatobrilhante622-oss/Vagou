@@ -30,6 +30,7 @@ jobs:
       REDIS_URL: redis://localhost:6379/0
       STORAGE_DIR: /tmp/vagou-ci-storage
       VAGOU_TEST_URL: http://127.0.0.1:8000
+      MODERATOR_EMAILS: '["moderator-ci@example.com"]'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

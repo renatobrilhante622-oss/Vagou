@@ -1,0 +1,10 @@
+<resources>
+    <style name="LaunchTheme" parent="@android:style/Theme.Black.NoTitleBar">
+        <item name="android:windowBackground">@drawable/launch_background</item>
+        <item name="android:statusBarColor">@color/vagou_navy</item>
+        <item name="android:navigationBarColor">@color/vagou_navy</item>
+    </style>
+    <style name="NormalTheme" parent="@android:style/Theme.Black.NoTitleBar">
+        <item name="android:windowBackground">@color/vagou_navy</item>
+    </style>
+</resources>

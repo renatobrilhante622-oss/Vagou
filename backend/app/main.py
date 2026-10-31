@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from redis.asyncio import Redis
@@ -9,6 +10,10 @@ from sqlalchemy import text
 from app.api import router
 from app.config import settings
 from app.db import Session, engine
+from app.auth import router as auth_router
+from app.moderation import router as moderation_router
+from app.automation import router as automation_router
+from app import automation_models
 
 # Redis uses server time windows; INCR and expiry run atomically across API instances.
 RATE_SCRIPT = """
@@ -28,6 +33,33 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title='Vagou!', version='1.0.0', lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=settings().allowed_origins, allow_methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], allow_headers=['Authorization', 'Content-Type'])
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, exception: RequestValidationError):
+    # Never echo rejected passwords, codes or other PII from Pydantic's input.
+    fields = []
+    labels = {'password': 'senha', 'email': 'e-mail', 'name': 'nome',
+              'company_cnpj': 'CNPJ', 'company_name': 'razão social',
+              'company_contact_email': 'e-mail corporativo', 'phone': 'telefone',
+              'code': 'código de confirmação', 'locations': 'cidade/estado'}
+    for error in exception.errors():
+        field = str(error['loc'][-1])
+        label = labels.get(field, 'campo informado')
+        kind = error['type']
+        if kind == 'string_too_short':
+            message = f'O campo {label} precisa ter pelo menos {error.get("ctx", {}).get("min_length", 1)} caracteres.'
+        elif kind == 'missing':
+            message = f'Preencha o campo {label}.'
+        elif field == 'email' or field.endswith('_email'):
+            message = 'Informe um endereço de e-mail válido.'
+        elif field == 'code':
+            message = 'Digite o código de seis dígitos enviado ao seu e-mail.'
+        else:
+            message = f'Confira o campo {label} e tente novamente.'
+        fields.append({'field': field, 'message': message})
+    return JSONResponse({'detail': fields[0]['message'] if fields else 'Confira os dados informados.',
+                         'errors': fields}, status_code=422)
 
 
 @app.middleware('http')
@@ -68,3 +100,6 @@ async def ready(request: Request):
 
 
 app.include_router(router)
+app.include_router(auth_router)
+app.include_router(moderation_router)
+app.include_router(automation_router)

@@ -1,179 +1,139 @@
 # Vagou!
 
-Base de API de empregabilidade para o mercado brasileiro e cliente Flutter de referência. Não há afirmação de prontidão comercial: esta entrega precisa das validações de integração, auditoria e configurações operacionais descritas abaixo antes de produção.
+Plataforma de empregabilidade com FastAPI, PostgreSQL, Redis, Celery, Alembic e cliente Flutter Android. Interface em português, Material 3 claro/escuro, onboarding, identidade própria, jornada de candidato e área de empresas.
 
-## Organização
+## Estrutura
 
 ```text
 backend/
   app/
-    main.py          # inicialização, rate limiting Redis e health checks
-    config.py        # variáveis validadas, segredos obrigatórios
-    db.py            # sessões assíncronas PostgreSQL
-    models.py        # usuários, vagas, candidaturas e restrições
-    schemas.py       # contratos Pydantic v2
-    security.py      # scrypt, JWT, autorização, Fernet
-    matching.py      # regras determinísticas e filtros
-    services.py      # candidatura idempotente e armazenamento
-    api.py           # rotas REST v1
-    worker.py        # Celery e agendamento premium
-    courses.py       # referências oficiais e regras de certificação
-  alembic/           # migração inicial explícita
-  tests/             # testes unitários e contrato integrado
-  .env.example
-  requirements.txt
-  Dockerfile
+    main.py                 # inicialização e validação amigável sem ecoar dados sensíveis
+    api.py                  # rotas existentes de perfil, PDF, vagas, matches e dashboard
+    auth.py                 # cadastro, login, código de e-mail e reenvio
+    smtp_transport.py       # Gmail/SMTP com STARTTLS ou SSL
+    mailer.py               # outbox criptografada, expiração e retries
+    company.py              # dígitos verificadores de CNPJ
+    moderation.py           # fila privada, aprovação e vagas do contratante
+    automation.py           # relatórios privados de ciclos e eventos
+    automation_models.py    # modelos dos relatórios
+    job_sources.py          # fontes JSON HTTPS autorizadas, sem scraping de formulários
+    worker.py               # tarefas Celery de e-mail, fontes e candidaturas
+    models.py / schemas.py  # persistência e contratos Pydantic v2
+    security.py / passwords.py / matching.py / services.py / db.py / config.py
+    courses.py              # referências oficiais com objetivos e contexto profissional
+  alembic/versions/          # migrações 0001 → 0002 → 0003
+  tests/
+  .env.example / Dockerfile / requirements.txt
 mobile/
-  lib/api.dart       # transporte HTTPS e Android Keystore via secure storage
-  lib/main.dart      # cadastro/login, feed, relatório, cursos, perfil e exclusão
+  lib/
+    main.dart / api.dart / ui.dart / home.dart
+    onboarding.dart / auth.dart
+    candidate.dart / jobs.dart / reporting.dart / courses.dart / recruiter.dart
+  android/                  # configuração SDK36, ícone e splash próprios
+  test/
   pubspec.yaml
-compose.yaml
+.github/workflows/          # backend CI e APK Android
+compose.yaml                # serviços/portas existentes preservados
+docs/OPERATIONS.md           # atualização, Gmail, moderação, fontes e release
 ```
 
-A aplicação não depende de portais externos: vagas são publicadas por recrutadores e candidaturas ficam disponíveis ao recrutador responsável no próprio Vagou!. Não existe envio de e-mail ou integração com ATS implícita. PDF não é usado para inferir competências; competências são declaradas pelo candidato. O score representa cobertura dessas competências, não probabilidade de contratação.
+## Funcionalidades
 
-## Execução local com Docker
+- Cadastro com código de confirmação de seis dígitos por e-mail; login só após confirmar. Empresas fornecem CNPJ, razão social e contato, sem exigir domínio corporativo próprio.
+- Perfil com competências declaradas, telefone criptografado, currículo PDF privado, indicadores de preenchimento e preferências por salário, modalidade e cidade/UF.
+- Matching determinístico: alto acima de75%, observação50–75%, descartado abaixo de50%; não representa probabilidade de contratação e não infere competências de PDFs.
+- Vagas novas moderadas antes de publicação. Empresas acompanham fila/status e candidaturas das próprias vagas.
+- Automação Premium opcional, com frequência/teto configuráveis, somente em vagas internas aprovadas; fontes externas autorizadas geram recomendações com ação manual no portal oficial.
+- Dashboard visual, histórico paginado, eventos detalhados de automação e cursos com modais de resumo, objetivos, impacto e CTA oficial. As regras de certificados variam por oferta; treinamento gratuito não equivale necessariamente a certificação profissional gratuita.
+- Exclusão autenticada de conta, currículo e registros associados; JWT revogável, scrypt, controles de acesso e rate limiting Redis.
 
-Requer Docker Compose, acesso aos registros oficiais e portas locais disponíveis. Não usar os exemplos de credenciais em produção.
+## Instalação e atualização
 
-1. Copie `backend/.env.example` para `backend/.env` sem sobrescrever configurações existentes.
-2. Gere `JWT_SECRET` usando `python -c "import secrets; print(secrets.token_urlsafe(48))"` e `DATA_KEY` usando `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` em um Python com as dependências instaladas. Guarde em um gerenciador de segredos; não versionar.
-3. Defina `POSTGRES_PASSWORD` no ambiente do Compose. Em `backend/.env`, defina `DATABASE_URL=postgresql+asyncpg://vagou:SENHA_URL_ENCODED@postgres:5432/vagou` e `REDIS_URL=redis://redis:6379/0`. Faça percent-encoding da senha na URL. O Compose lê a senha do banco no ambiente do comando, não de `backend/.env`.
-4. Execute `docker compose up --build -d`. A migração precisa terminar antes da API e workers. Apenas um processo beat deve estar ativo.
-5. Valide com `curl --fail http://127.0.0.1:8000/health/ready`; consulte `/docs` e `/openapi.json` para contratos completos. O endereço local é para desenvolvimento, não para configurar o aplicativo distribuído.
-6. Execute `cd backend && python -m venv .venv && .venv/bin/pip install -r requirements.txt` e `VAGOU_TEST_URL=http://127.0.0.1:8000 .venv/bin/python -m unittest discover -s tests -v`. Os testes usam exclusivamente contas próprias descartáveis. Não rodar testes contra produção.
-7. Pare com `docker compose down`. Não usar `down -v` se precisar preservar dados.
+Leia [o guia operacional](docs/OPERATIONS.md) antes de atualizar uma instalação existente. Preserve as chaves, URLs e volumes atuais. A confirmação de e-mail passa a ser exigida também das contas antigas; use o fluxo de reenvio após configurar SMTP.
 
-Sem Docker: configure PostgreSQL 16, Redis 7 e as URLs locais; na pasta `backend`, instale as dependências, exporte as variáveis do `.env` de forma segura, rode `alembic upgrade head`, `uvicorn app.main:app`, `celery -A app.worker:celery worker --concurrency=2` e, em um único processo separado, `celery -A app.worker:celery beat --schedule=/tmp/vagou-beat`. Arquivos `.env` são carregados pela aplicação, não são comandos shell.
+Para uma instalação nova, copie `backend/.env.example` para `backend/.env`, instale `backend/requirements.txt` em um ambiente Python3.12 e gere suas chaves:
 
-As versões em requirements são intervalos compatíveis, não um lock reproduzível. Gerar lock com hashes, revisar CVEs e fixar imagens por digest em CI antes de release. Não foi possível resolver um lock confiável nesta máquina sem acesso ao registro.
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Use os valores gerados em `JWT_SECRET` e `DATA_KEY` no ambiente privado, sem versionar. Configure `POSTGRES_PASSWORD` no ambiente do Compose e a senha correspondente, com percent-encoding, na `DATABASE_URL` de `backend/.env`. Dentro do Compose, os hosts são `postgres:5432` e `redis:6379`; não altere uma configuração existente que já funciona. Configure Gmail SMTP conforme o guia e execute:
+
+```bash
+docker compose up --build -d
+curl --fail http://127.0.0.1:8000/health/ready
+```
+
+A documentação OpenAPI está em `/docs`. Dependências usam intervalos compatíveis, não lock com hashes; revisar e fixar dependências/imagens antes de release comercial.
 
 ## Contratos principais
 
-Prefixo `/v1`; autorização `Authorization: Bearer <access_token>`. UUIDs identificam recursos. Respostas de erro usam `detail`. Cadastro não aceita `is_premium`: somente uma integração de cobrança confiável deve conceder esse direito. Não há endpoint público de promoção a Premium nem cobrança implementada.
+Todos os caminhos abaixo usam prefixo `/v1`. Autorização: `Authorization: Bearer <access_token>`. As rotas existentes foram preservadas; a confirmação e a moderação acrescentam requisitos de acesso.
 
-| Método | Caminho | Acesso / finalidade |
+| Método | Rota | Uso |
 |---|---|---|
-| POST | /auth/register | público, candidato ou recrutador |
-| POST | /auth/login | público, token de 15 minutos |
-| POST | /auth/logout | revoga todas as sessões do usuário |
-| GET, DELETE | /me | perfil; exclusão com senha recente |
-| PUT | /me/profile | candidato, competências e telefone |
-| PUT | /me/preferences | candidato, filtros e consentimento de automação |
-| PUT, GET | /me/resume | candidato, PDF privado de até 5 MiB e 20 páginas |
-| POST, GET | /jobs | recrutador cria; listagem pública paginada |
-| GET, DELETE | /jobs/{id} | detalhe público; proprietário encerra |
-| GET | /matches | candidato, score, categoria e lacunas |
-| POST | /jobs/{id}/applications | candidato, envio idempotente |
-| GET | /applications | histórico paginado; recrutador vê só suas vagas |
-| PATCH | /applications/{id} | recrutador proprietário atualiza status |
-| GET | /applications/{id}/resume | recrutador proprietário baixa currículo |
-| GET | /dashboard | candidato, métricas consolidadas |
-| GET | /courses?skill=python | catálogo oficial por competência |
+| POST | `/auth/register` | Cadastro candidato/empresa, agenda código |
+| POST | `/auth/verify-email` | Confirma código único de seis dígitos |
+| POST | `/auth/resend-verification` | Reenvio limitado, resposta neutra |
+| POST | `/auth/login`, `/auth/logout` | JWT de15min e revogação de sessões |
+| GET, DELETE | `/me` | Perfil próprio / exclusão com senha |
+| PUT | `/me/profile`, `/me/preferences` | Perfil e critérios/consentimento |
+| GET, PUT | `/me/resume` | PDF privado de até5MiB/20páginas |
+| GET, POST | `/jobs` | Feed aprovado / empresa cria anúncio pendente |
+| GET, DELETE | `/jobs/{id}` | Detalhe aprovado / proprietário encerra |
+| GET | `/matches` | Compatibilidade e lacunas, paginado |
+| POST | `/jobs/{id}/applications` | Candidatura interna idempotente; externo exige ação manual |
+| GET, PATCH | `/applications`, `/applications/{id}` | Histórico próprio / empresa atualiza status |
+| GET | `/applications/{id}/resume` | Empresa responsável acessa currículo atual |
+| GET | `/dashboard` | Contagens, média e status consolidados |
+| GET | `/courses` | Catálogo oficial por competência opcional |
+| GET | `/recruiter/jobs` | Vagas do proprietário, inclusive moderação |
+| GET, PATCH | `/moderation/jobs`, `/moderation/jobs/{id}` | Fila e decisão por equipe autorizada |
+| GET | `/automation/runs`, `/automation/runs/{id}/events` | Relatórios Premium privados |
 
-### Cadastro
-
-```json
-{
-  "email": "ana@example.com",
-  "password": "UmaSenhaLongaEUnica!2026",
-  "name": "Ana Silva",
-  "role": "candidate",
-  "privacy_version": "2026-01",
-  "consent": true
-}
-```
-
-### Login
+### Cadastro e confirmação
 
 ```json
-{"email":"ana@example.com","password":"UmaSenhaLongaEUnica!2026"}
+{"email":"ana@example.com","password":"SenhaLongaEUnica!2026","name":"Ana Silva","role":"candidate","privacy_version":"2026-01","consent":true}
 ```
 
-Resposta (token abaixo representado simbolicamente, nunca um segredo real):
+Para `role=recruiter`, acrescente `company_cnpj`, `company_name`, `company_contact_email` e `company_phone` no formato `+55DDDnumero`. Não envie `is_premium`: a assinatura deve ser administrada por um processo confiável de cobrança. A integração de cobrança não foi incluída.
+
+`POST /auth/verify-email`:
 
 ```json
-{"access_token":"<JWT assinado>","token_type":"bearer","expires_in":900}
+{"email":"ana@example.com","code":"123456"}
 ```
 
-Não há refresh token nesta versão: após expiração, novo login é necessário. O logout incrementa a versão do token no banco e invalida todas as sessões; exclusão invalida tokens pela ausência do usuário.
+O código acima é apenas exemplo de formato, não uma credencial ou código universal. A API só aceita o código efetivamente enviado e não o retorna nas respostas. Depois de confirmar, `POST /auth/login` recebe e-mail/senha e retorna `access_token`, `token_type=bearer`, `expires_in=900`. Não há refresh token: a sessão expirada exige novo login.
 
-### Perfil e critérios
-
-`PUT /me/profile`:
+### Preferências
 
 ```json
-{"name":"Ana Silva","phone":"+5511999999999","skills":["python","sql","docker"]}
+{"titles":["Python","Backend"],"min_salary":5000,"modalities":["remote","hybrid"],"locations":["São Paulo / SP"],"automation_enabled":true,"automation_max_applications_per_run":20,"automation_interval_minutes":60}
 ```
 
-`PUT /me/preferences`:
-
-```json
-{
-  "titles": ["Python", "Backend"],
-  "min_salary": 5000,
-  "modalities": ["remote", "hybrid"],
-  "locations": ["São Paulo"],
-  "automation_enabled": true
-}
-```
-
-Ativar automação exige `is_premium=true`. A flag é administrada no banco por um processo de cobrança confiável; não conceder direitos pelo cliente. Sem Premium, o exemplo acima retorna 403. A automação exige currículo e autorização explícita, verifica elegibilidade a cada ciclo e só aplica em score >75. Filtros com listas vazias aceitam qualquer valor. Localização é ignorada para remoto. Salário compara a remuneração máxima anunciada com o mínimo do candidato; não promete que a contratação pagará aquele máximo.
-
-### Match
-
-```json
-{
-  "match_score": 75,
-  "category": "observation",
-  "missing_skills": ["redis"]
-}
-```
-
-Score = competências exigidas atendidas / competências exigidas únicas × 100, arredondado. Normaliza caixa e acentos, preserva distinção entre Java e JavaScript. Não inventa equivalências. Alto: 76–100; observação: 50–75; descartada: 0–49. Requisitos vazios geram 0. Os contratos de vaga impedem lista vazia. O feed mobile oculta descartadas; API retorna categoria para transparência. `/matches` pagina vagas examinadas antes do filtro; continuar pelo `next_offset`, inclusive em páginas vazias. Para catálogo grande, materializar matches por versão de perfil/vaga e adotar paginação por cursor; o worker atual faz varredura paginada a cada minuto e não é uma solução de escala ilimitada.
+Automação exige Premium, confirmação e currículo. Presencial/híbrido exige cidade/estado. Remoto ignora localização; listas vazias de filtros aceitam qualquer valor. O salário compara a máxima anunciada com o mínimo desejado, sem garantir remuneração contratada. `/matches` pagina vagas examinadas antes do filtro; continue pelo `next_offset`, inclusive em páginas vazias.
 
 ### Dashboard
 
-`GET /dashboard` não recebe corpo. Exemplo ilustrativo de resposta:
+`GET /dashboard` não recebe corpo. Exemplo ilustrativo:
 
 ```json
-{
-  "total_applications": 42,
-  "manual": 12,
-  "automatic": 30,
-  "observation_jobs": 8,
-  "average_match_score": 86.5,
-  "by_status": {"submitted":30,"reviewing":8,"interview":3,"hired":1},
-  "generated_at":"2026-10-31T00:00:00Z"
-}
+{"total_applications":42,"manual":12,"automatic":30,"observation_jobs":8,"average_match_score":86.5,"by_status":{"submitted":30,"reviewing":8,"interview":3,"hired":1}}
 ```
 
-A média é das candidaturas registradas, não do feed. Observação conta vagas ativas elegíveis para os filtros atuais. Status corrente e origem estão no histórico; não há log de cada transição nem histórico de ciclos sem candidatura.
+A média é das candidaturas registradas. Vagas em observação usam os critérios atuais. O timestamp `generated_at` também é retornado. `DELETE /me` recebe a senha atual em JSON e remove a conta, o PDF ativo e os registros em cascata. Currículos não são copiados por candidatura: o recrutador acessa a versão atual enquanto houver autorização.
 
-### Exclusão
+## Android
 
-`DELETE /me` com `{"password":"senha atual"}` retorna 204. Remove PDF ativo, usuário, candidaturas e, para recrutador, vagas/candidaturas associadas por cascade. O acesso do recrutador ao currículo é revogado com a exclusão do candidato. A implementação usa o currículo atual, não uma cópia histórica por candidatura. Falha de armazenamento interrompe a exclusão; o cliente pode repetir a operação.
+API local preservada: `http://192.168.18.128:8000`. SDK36/36/24, Java17, Gradle8.11.1 e AGP8.9.1 permanecem fixados. O workflow entrega um artifact com um APK; em tags `v*`, publica também um asset `.apk` direto em GitHub Releases. O download de artifacts do Actions é ZIP por regra do serviço. Leia as instruções de publicação/assinatura no guia: APK interno com assinatura de debug não é release pronto para Google Play.
 
-## Android / Flutter
+## Segurança e limites de validação
 
-O código é um cliente de referência com telas essenciais de candidato; recrutadores usam os contratos REST (painel mobile de gestão não implementado). Requer Flutter estável com Dart >=3.5 e SDK Android. Na pasta `mobile`, execute `flutter create --platforms=android --project-name vagou .`, revise os arquivos gerados, `flutter pub get`, `flutter analyze` e `flutter build apk --release --dart-define=API_BASE_URL=https://api.seu-dominio-real`. Informe a URL HTTPS real, sem barra final. Nenhum APK foi compilado neste ambiente, que não tem Flutter/Android SDK.
+A implementação não constitui certificação LGPD/Google Play nem garantia de prontidão comercial. O operador deve publicar política com controlador/contato, base legal, compartilhamento, retenção, direitos e página web de exclusão. É necessário plano de expurgo de backups, consentimento e operação de moderação. A autenticação confirma o controle do e-mail, não a identidade civil ou a regularidade empresarial.
 
-No manifesto Android gerado, declare apenas `android.permission.INTERNET` e `android:usesCleartextTraffic="false"`. Desative backup (`android:allowBackup="false"`) ou exclua explicitamente o armazenamento seguro nas regras de backup. Use o seletor de documentos do sistema; não solicitar permissão ampla de arquivos, SMS, contatos, localização ou acessibilidade. Configure applicationId próprio, assinatura em cofre/Play App Signing, ícones, versões e target SDK exigido na data da publicação. Não versionar keystore ou senhas de assinatura.
+Produção exige TLS, banco/volumes/backups criptografados, chaves em cofre, rede privada, observabilidade, revisão de segurança e assinatura Android própria. HTTP local foi mantido por requisito do ambiente de desenvolvimento. PDFs são limitados, criptografados e privados, mas parsing não substitui antivírus/CDR: integrar scanner isolado e reconciliação de arquivos órfãos. Banco e filesystem não compartilham transação. Os relatórios exigem política de retenção; o worker faz varredura paginada, ainda sem índice de matching materializado para catálogos muito grandes.
 
-As telas cobrem login/cadastro, feed com candidatura e paginação, critérios Premium, perfil, upload PDF, cursos externos, relatórios, logout e exclusão. Material 3 acompanha tema do dispositivo. Erros, carregamento e nova autenticação são explícitos. O APK, assinatura e formulários da Play Console são etapas de release separadas.
-
-## Segurança, LGPD e limites para produção
-
-- Expor somente via gateway HTTPS/TLS; rede privada entre API, Redis e PostgreSQL. Configurar TLS também no banco/Redis fora de redes locais isoladas. Não habilitar confiança em headers de proxy de fontes arbitrárias. O Dockerfile desativa proxy headers; com gateway confiável, configurar lista explícita de IPs permitidos.
-- Senhas usam scrypt com salt individual e comparação constante. JWT tem emissor, audiência, expiração e versão revogável. Redis impõe limites compartilhados; falha de Redis retorna 503 em vez de remover a proteção. No gateway limitar corpo a 6 MiB e configurar timeouts/conexões. O endpoint de upload limita leitura, mas o parser multipart pode consumir recursos antes da validação.
-- Telefone e PDFs usam Fernet autenticado. Banco, e-mail, nome e volumes precisam de criptografia de disco/backups pelo provedor. A chave deve ficar em KMS/cofre separado dos dados; perda da chave impede recuperação. Rotação de chaves requer recriptografia operacional, não está automatizada.
-- PDF é privado, baixado como anexo, com limite, parsing e rejeição de ações de catálogo/formulários/anexos. Isso **não é antivírus nem sanitização completa**: integrar scanner de malware/CDR em processo isolado, quarentena e bloqueio de download até aprovação antes de produção. Bibliotecas de parsing exigem atualizações e limites de CPU/memória.
-- Arquivos são escritos atomicamente com permissões restritas. Banco e filesystem não compartilham transação: uma falha entre gravação e commit pode deixar arquivo órfão. Antes de produção, implementar outbox/reconciliação para remoção de órfãos e exclusão verificável em armazenamento durável privado. `/tmp` é apenas padrão de desenvolvimento; Compose usa volume persistente na API.
-- Política de privacidade deve informar controlador, contato do encarregado, finalidade/base legal por tratamento, compartilhamento com recrutadores, direitos do titular e retenção. Consentimento de automação é separado. O aceite versionado não substitui análise jurídica das bases legais.
-- Publicar página web de exclusão acessível fora do APK e cadastrar URL na Play Console; endpoint REST sozinho não satisfaz toda a experiência exigida. Definir expiração de backups e impedir restauração de dados excluídos com registro de exclusão/reaplicação. Preencher Data Safety com os fluxos reais. Não anunciar conformidade certificada com base apenas neste código.
-- Antes de venda: verificação de e-mail, recuperação de senha com token de uso único, cobrança e webhooks assinados para Premium, verificação de recrutadores/antifraude, auditoria de eventos sem PII, observabilidade, testes de concorrência/carga, acessibilidade e revisão de segurança. O serviço atual permite cadastro de recrutador sem verificação empresarial.
-- Cursos são referências oficiais de catálogo, sem scraping ou promessa de disponibilidade. Microsoft Learn oferece conquistas gratuitas, mas certificação profissional pode exigir exame pago; SENAI varia por região. Confirmar curso, gratuidade e certificado antes de exibir o selo “gratuito com certificado”. Links não foram verificados por rede nesta sessão.
-
-## Estado de validação desta entrega
-
-Testes unitários do motor são executáveis com a biblioteca padrão. A suíte integrada exige dependências e stack real; sem sua execução não é possível afirmar que banco, migrações, worker e endpoints funcionam em conjunto. A compilação Python valida apenas sintaxe. O proxy da máquina atual recusa conexões; SQLAlchemy, Alembic, Celery, pypdf e Flutter não estavam disponíveis. Veja o relatório final da tarefa para resultados efetivamente executados.
+Os testes diferenciam execução real e casos ignorados. Esta máquina não tem SQLAlchemy/Celery/Flutter disponíveis, e o proxy impede instalar dependências; por isso os testes integrados, entrega Gmail real e geração de APK dependem de ambiente configurado/CI. Consulte os resultados da tarefa e o workflow; não trate verificação de sintaxe como prova de funcionamento integrado.

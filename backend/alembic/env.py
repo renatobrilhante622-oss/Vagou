@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from app.config import settings
 from app.db import Base
 from app import models
+from app import automation_models
 
 config = context.config
 target_metadata = Base.metadata

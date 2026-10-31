@@ -8,7 +8,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, UploadFi
 from fastapi.responses import StreamingResponse
 from pypdf import PdfReader
 from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -16,8 +15,8 @@ from app.courses import COURSES
 from app.db import session
 from app.matching import eligible, match, normalize
 from app.models import Application, Job, User
-from app.schemas import DeleteAccount, JobCreate, JobOut, Login, Preferences, ProfileUpdate, Register, StatusUpdate
-from app.security import DUMMY_HASH, cipher, current_user, hash_password, role, token, verify_password
+from app.schemas import DeleteAccount, JobCreate, JobOut, PublicJobOut, Preferences, ProfileUpdate, StatusUpdate
+from app.security import cipher, current_user, role, verify_password
 from app.services import apply, private_storage
 
 router = APIRouter(prefix='/v1')
@@ -29,40 +28,12 @@ DB = Depends(session)
 def account_view(user):
     return {'id': user.id, 'email': user.email, 'name': user.name, 'role': user.role, 'skills': user.skills,
             'is_premium': user.is_premium, 'automation_enabled': user.automation_enabled,
-            'has_resume': bool(user.resume_key), 'preferences': user.preferences}
-
-
-@router.post('/auth/register', status_code=201)
-async def register(payload: Register, db: AsyncSession = DB):
-    if payload.privacy_version != settings().privacy_version:
-        raise HTTPException(422, 'Accept the current privacy policy version')
-    user = User(email=str(payload.email).casefold(), name=payload.name, role=payload.role,
-                password_hash=await asyncio.to_thread(hash_password, payload.password), privacy_version=payload.privacy_version)
-    db.add(user)
-    try:
-        await db.commit()
-    except IntegrityError:
-        await db.rollback()
-        raise HTTPException(409, 'Registration unavailable for this email') from None
-    return account_view(user)
-
-
-@router.post('/auth/login')
-async def login(payload: Login, db: AsyncSession = DB):
-    user = await db.scalar(select(User).where(User.email == str(payload.email).casefold()))
-    valid = await asyncio.to_thread(verify_password, payload.password, user.password_hash if user else DUMMY_HASH)
-    if not user or not valid:
-        raise HTTPException(401, 'Invalid credentials')
-    return {'access_token': token(user), 'token_type': 'bearer', 'expires_in': settings().access_minutes * 60}
-
-
-@router.post('/auth/logout', status_code=204)
-async def logout(user: User = Depends(current_user), db: AsyncSession = DB):
-    # Lock prevents lost increments during simultaneous logout requests.
-    user = await db.scalar(select(User).where(User.id == user.id).with_for_update())
-    user.token_version += 1
-    await db.commit()
-    return Response(status_code=204)
+            'has_resume': bool(user.resume_key), 'preferences': user.preferences,
+            'phone': cipher().decrypt(user.phone_encrypted.encode()).decode() if user.phone_encrypted else None,
+            'email_verified': user.email_verified, 'company_cnpj': user.company_cnpj,
+            'company_name': user.company_name, 'company_contact_email': user.company_contact_email,
+            'profile_completion': round(100 * sum([bool(user.name), bool(user.skills),
+                bool(user.phone_encrypted), bool(user.resume_key), bool(user.preferences.get('titles'))]) / 5)}
 
 
 @router.get('/me')
@@ -92,6 +63,8 @@ async def preferences(payload: Preferences, user: User = Candidate, db: AsyncSes
 @router.delete('/me', status_code=204)
 async def delete_account(payload: DeleteAccount, user: User = Depends(current_user), db: AsyncSession = DB):
     user = await db.scalar(select(User).where(User.id == user.id).with_for_update())
+    if not user:
+        raise HTTPException(401, 'Esta conta não está mais disponível.')
     if not await asyncio.to_thread(verify_password, payload.password, user.password_hash):
         raise HTTPException(401, 'Invalid credentials')
     # File removal first: storage errors must not silently orphan a sensitive file.
@@ -169,22 +142,22 @@ async def download_resume(user: User = Candidate):
 
 @router.post('/jobs', response_model=JobOut, status_code=201)
 async def create_job(payload: JobCreate, user: User = Recruiter, db: AsyncSession = DB):
-    job = Job(**payload.model_dump(), recruiter_id=user.id)
+    job = Job(**payload.model_dump(), recruiter_id=user.id, moderation_status='pending')
     db.add(job)
     await db.commit()
     await db.refresh(job)
     return job
 
 
-@router.get('/jobs', response_model=list[JobOut])
+@router.get('/jobs', response_model=list[PublicJobOut])
 async def jobs(offset: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=100), db: AsyncSession = DB):
-    return (await db.scalars(select(Job).where(Job.active.is_(True)).order_by(Job.created_at.desc(), Job.id).offset(offset).limit(limit))).all()
+    return (await db.scalars(select(Job).where(Job.active.is_(True), Job.moderation_status == 'approved').order_by(Job.created_at.desc(), Job.id).offset(offset).limit(limit))).all()
 
 
-@router.get('/jobs/{job_id}', response_model=JobOut)
+@router.get('/jobs/{job_id}', response_model=PublicJobOut)
 async def job_detail(job_id: uuid.UUID, db: AsyncSession = DB):
     job = await db.get(Job, job_id)
-    if not job or not job.active:
+    if not job or not job.active or job.moderation_status != 'approved':
         raise HTTPException(404, 'Job not found')
     return job
 
@@ -202,18 +175,25 @@ async def close_job(job_id: uuid.UUID, user: User = Recruiter, db: AsyncSession 
 @router.get('/matches')
 async def matches(offset: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=100), user: User = Candidate, db: AsyncSession = DB):
     # Pagination is over active jobs examined; filters can make a page shorter.
-    rows = (await db.scalars(select(Job).where(Job.active.is_(True)).order_by(Job.created_at.desc(), Job.id).offset(offset).limit(limit))).all()
-    return {'items': [{'job': JobOut.model_validate(j).model_dump(mode='json'), **match(user.skills, j.keywords)} for j in rows if eligible(j, user.preferences)], 'next_offset': offset + len(rows) if len(rows) == limit else None}
+    rows = (await db.scalars(select(Job).where(Job.active.is_(True), Job.moderation_status == 'approved').order_by(Job.created_at.desc(), Job.id).offset(offset).limit(limit))).all()
+    return {'items': [{'job': PublicJobOut.model_validate(j).model_dump(mode='json'), **match(user.skills, j.keywords)} for j in rows if eligible(j, user.preferences)], 'next_offset': offset + len(rows) if len(rows) == limit else None}
 
 
 @router.post('/jobs/{job_id}/applications')
 async def manual_apply(job_id: uuid.UUID, user: User = Candidate, db: AsyncSession = DB):
     user = await db.scalar(select(User).where(User.id == user.id).with_for_update())
-    job = await db.scalar(select(Job).where(Job.id == job_id, Job.active.is_(True)).with_for_update())
+    if not user:
+        raise HTTPException(401, 'Esta conta não está mais disponível.')
+    job = await db.scalar(select(Job).where(Job.id == job_id, Job.active.is_(True), Job.moderation_status == 'approved').with_for_update())
     if not job:
         raise HTTPException(404, 'Job not found')
+    if job.recruiter_id is None:
+        if not job.source_url:
+            raise HTTPException(409, 'Esta vaga ainda não possui um canal oficial de candidatura.')
+        return {'created': False, 'status': 'requires_manual', 'external_url': job.source_url,
+                'message': 'Conclua a candidatura no site oficial da vaga.'}
     if not user.resume_key:
-        raise HTTPException(409, 'Upload your resume before applying')
+        raise HTTPException(409, 'Envie seu currículo antes de se candidatar.')
     application_id, created = await apply(db, user, job, 'manual')
     await db.commit()
     return {'id': application_id, 'created': created, 'status': 'submitted'}
@@ -221,11 +201,13 @@ async def manual_apply(job_id: uuid.UUID, user: User = Candidate, db: AsyncSessi
 
 @router.get('/applications')
 async def applications(offset: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=100), user: User = Depends(current_user), db: AsyncSession = DB):
-    query = select(Application, Job).join(Job, Job.id == Application.job_id)
+    query = select(Application, Job, User.name).select_from(Application).join(Job, Job.id == Application.job_id).join(User, User.id == Application.candidate_id)
     query = query.where(Application.candidate_id == user.id) if user.role == 'candidate' else query.where(Job.recruiter_id == user.id)
     rows = (await db.execute(query.order_by(Application.created_at.desc(), Application.id).offset(offset).limit(limit))).all()
     return [{'id': a.id, 'job_id': j.id, 'job_title': j.title, 'candidate_id': a.candidate_id,
-             'source': a.source, 'status': a.status, 'match_score': a.match_score, 'created_at': a.created_at} for a, j in rows]
+             'source': a.source, 'status': a.status, 'match_score': a.match_score, 'created_at': a.created_at,
+             'company': j.company, 'job_url': j.source_url, 'job_path': f'/v1/jobs/{j.id}',
+             'source_name': j.source_name, 'candidate_name': candidate_name} for a, j, candidate_name in rows]
 
 
 @router.get('/applications/{application_id}/resume')
@@ -255,7 +237,7 @@ async def dashboard(user: User = Candidate, db: AsyncSession = DB):
         by_status[status] = by_status.get(status, 0) + count
     observation = 0
     # Stream bounded batches instead of retaining the entire job catalog.
-    result = await db.stream_scalars(select(Job).where(Job.active.is_(True)).execution_options(yield_per=200))
+    result = await db.stream_scalars(select(Job).where(Job.active.is_(True), Job.moderation_status == 'approved').execution_options(yield_per=200))
     async for job in result:
         if eligible(job, user.preferences) and match(user.skills, job.keywords)['category'] == 'observation':
             observation += 1
