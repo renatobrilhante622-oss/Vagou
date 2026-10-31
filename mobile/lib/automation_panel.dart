@@ -225,14 +225,33 @@ class _AutomationPanelState extends State<_AutomationPanel> {
     ]));
   }
 
+  Widget _statusBadge(String label) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+    decoration: BoxDecoration(color: Colors.white.withValues(alpha: .12), borderRadius: BorderRadius.circular(20), border: Border.all(color: const Color(0xFFE7C36A).withValues(alpha: .5))),
+    child: Text(label, style: const TextStyle(color: Color(0xFFE7C36A), fontSize: 11, fontWeight: FontWeight.w800)),
+  );
+
   @override
   Widget build(BuildContext context) {
     if (_loading) return const SizedBox(height: 320, child: Center(child: CircularProgressIndicator()));
     final active = _activeRunId != null || _runStatus == 'running' || _runStatus == 'queued';
     return Padding(padding: const EdgeInsets.fromLTRB(20, 8, 20, 24), child: ListView(shrinkWrap: true, children: [
-      const SectionTitle(title: 'Robô de Candidaturas', subtitle: 'A automação só envia candidaturas para vagas internas aprovadas. Vagas externas ficam para sua avaliação.'),
+      Container(margin: const EdgeInsets.only(bottom: 16), padding: const EdgeInsets.all(20), decoration: BoxDecoration(
+        gradient: const LinearGradient(colors: [Brand.navy, Color(0xFF1E4864)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+        borderRadius: BorderRadius.circular(18),
+      ), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [Container(width: 42, height: 42, decoration: BoxDecoration(color: Brand.coral.withValues(alpha: .18), borderRadius: BorderRadius.circular(12)), child: const Icon(Icons.radar, color: Color(0xFFE7C36A))), const SizedBox(width: 12), Expanded(child: Text('Central de Automação', style: Theme.of(context).textTheme.titleLarge?.copyWith(color: Colors.white, fontWeight: FontWeight.w800))), if (_busy) const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))]),
+        const SizedBox(height: 12),
+        Wrap(spacing: 8, runSpacing: 4, children: [
+          _statusBadge(_premium ? 'VAGOU! PRO' : 'PLANO GRATUITO'),
+          if (_premium && _user['automation_enabled'] == true) _statusBadge('ROBÔ ATIVO 24/7'),
+          if (active) _statusBadge('BUSCA EM ANDAMENTO'),
+        ]),
+        const SizedBox(height: 8),
+        const Text('A automação aplica em vagas internas compatíveis. Portais externos abrem para sua revisão e candidatura.', style: TextStyle(color: Colors.white70)),
+      ])),
       Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [Icon(_premium ? Icons.bolt : Icons.lock_outline, color: Brand.coral), const SizedBox(width: 10), Expanded(child: Text(_premium ? 'Premium Ativo' : 'Plano Gratuito', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800))), if (_busy) const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))]),
+        Row(children: [Icon(_premium ? Icons.workspace_premium : Icons.lock_outline, color: Brand.coral), const SizedBox(width: 10), Expanded(child: Text(_premium ? 'Premium Ativo' : 'Plano Gratuito', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800))), if (_busy) const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))]),
         const SizedBox(height: 8),
         SwitchListTile(contentPadding: EdgeInsets.zero, title: const Text('Ativar envio automático'), subtitle: Text(_premium ? 'O robô seguirá estes critérios em segundo plano.' : 'Atualize o acesso para ativar a automação.'), value: _premium && _user['automation_enabled'] == true, onChanged: _busy || !_premium ? null : _toggle),
         if (!_premium) OutlinedButton.icon(onPressed: _busy ? null : _refreshAccess, icon: const Icon(Icons.refresh), label: const Text('Atualizar meu acesso')),
@@ -249,12 +268,27 @@ class _AutomationPanelState extends State<_AutomationPanel> {
       if (_premium && _user['automation_enabled'] != true) const Padding(padding: EdgeInsets.only(top: 8), child: Text('Ative o envio automático para iniciar uma varredura.')),
       if (active || _latestRun.isNotEmpty) ...[
         const SizedBox(height: 18), const SectionTitle(title: 'Progresso da execução'),
-        Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(statusLabel(active ? (_runStatus.isEmpty ? 'running' : _runStatus) : '${_latestRun['status'] ?? 'complete'}'), style: const TextStyle(fontWeight: FontWeight.w800)),
-          if (active) ...[const SizedBox(height: 10), const LinearProgressIndicator()],
-          const SizedBox(height: 12),
-          Text('${_count('collected_jobs')} coletadas · ${_count('scanned_jobs')} analisadas (${_count('external_jobs_scanned')} externas) · ${_count('submitted_applications')} enviadas · ${_count('possible_match_jobs')} possíveis · ${_count('filtered_jobs')} descartadas'),
+        Padding(padding: const EdgeInsets.only(bottom: 12), child: Row(children: [
+          Expanded(child: Text(statusLabel(active ? (_runStatus.isEmpty ? 'running' : _runStatus) : '${_latestRun['status'] ?? 'complete'}'), style: const TextStyle(fontWeight: FontWeight.w800))),
+          if (active) const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
         ])),
+        if (active) const Padding(padding: EdgeInsets.only(bottom: 12), child: LinearProgressIndicator(minHeight: 5)),
+        LayoutBuilder(builder: (context, constraints) {
+          final metrics = [
+            ('Coletadas', _count('collected_jobs'), Icons.travel_explore),
+            ('Varridas', _count('scanned_jobs'), Icons.radar),
+            ('Possíveis', _count('possible_match_jobs'), Icons.auto_awesome_outlined),
+            ('Enviadas', _count('submitted_applications'), Icons.send_outlined),
+          ];
+          return Wrap(spacing: 8, runSpacing: 0, children: [for (final metric in metrics)
+            SizedBox(width: (constraints.maxWidth - 8) / 2, child: Container(
+              margin: const EdgeInsets.only(bottom: 8), padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(12), border: Border.all(color: Theme.of(context).colorScheme.outlineVariant)),
+              child: Row(children: [Icon(metric.$3, color: Brand.teal), const SizedBox(width: 8), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('${metric.$2}', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900)), Text(metric.$1, maxLines: 1, overflow: TextOverflow.ellipsis)]))]),
+            )),
+          ]);
+        }),
+        Padding(padding: const EdgeInsets.only(bottom: 12), child: Text('${_count('external_jobs_scanned')} externas analisadas · ${_count('filtered_jobs')} descartadas', style: Theme.of(context).textTheme.bodySmall)),
       ],
       if (_premium) ...[
         const SectionTitle(title: 'Vagas enviadas / encaminhadas'),

@@ -79,15 +79,31 @@ class _CandidateProfileState extends State<CandidateProfile> {
   @override
   Widget build(BuildContext context) {
     final user = widget.user;
-    final completed = [_name.text.trim().isNotEmpty, _skills.text.trim().isNotEmpty, user['has_resume'] == true].where((v) => v).length;
+    final preferences = Map<String, dynamic>.from(user['preferences'] as Map? ?? const {});
+    final skills = _terms(_skills.text);
+    final target = List<String>.from(preferences['titles'] as List? ?? const []);
+    final locations = List<String>.from(preferences['locations'] as List? ?? const []);
+    final courses = List<String>.from(preferences['completed_course_ids'] as List? ?? const []);
+    final completion = [
+      _name.text.trim().isNotEmpty, user['email_verified'] == true,
+      (_phone.text.trim().isNotEmpty), skills.isNotEmpty,
+      user['has_resume'] == true, target.isNotEmpty,
+    ].where((value) => value).length;
+    final profileStrength = (completion * 100 / 6).round();
     final premium = _premium || user['is_premium'] == true;
     return ListView(padding: const EdgeInsets.fromLTRB(20, 8, 20, 32), children: [
       Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [CircleAvatar(radius: 32, backgroundColor: Brand.teal.withValues(alpha: .12), child: Text(_name.text.trim().isEmpty ? 'V' : _name.text.trim().substring(0, 1).toUpperCase(), style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w800, color: Brand.teal))), const SizedBox(width: 16), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('${user['name']}', style: Theme.of(context).textTheme.titleLarge), const SizedBox(height: 4), Text('${user['email']}', style: Theme.of(context).textTheme.bodySmall)]))]),
+        Row(children: [CircleAvatar(radius: 32, backgroundColor: Brand.teal.withValues(alpha: .12), child: Text(_name.text.trim().isEmpty ? 'V' : _name.text.trim().substring(0, 1).toUpperCase(), style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w800, color: Brand.teal))), const SizedBox(width: 16), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('${user['name']}', style: Theme.of(context).textTheme.titleLarge), const SizedBox(height: 4), Text('${user['email']}', style: Theme.of(context).textTheme.bodySmall), const SizedBox(height: 8), Wrap(spacing: 6, children: [Chip(visualDensity: VisualDensity.compact, avatar: Icon(user['email_verified'] == true ? Icons.verified : Icons.mark_email_unread_outlined, size: 16), label: Text(user['email_verified'] == true ? 'Verificada' : 'Pendente')), if (premium) const Chip(visualDensity: VisualDensity.compact, avatar: Icon(Icons.workspace_premium, size: 16), label: Text('Premium'))])]))]),
         const SizedBox(height: 24),
-        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('Perfil profissional'), Text('${(completed * 100 / 3).round()}%', style: const TextStyle(fontWeight: FontWeight.w800))]),
-        const SizedBox(height: 10), LinearProgressIndicator(value: completed / 3, minHeight: 8, borderRadius: BorderRadius.circular(8)),
-        const SizedBox(height: 10), const Text('Mantenha seus dados, competências e currículo atualizados.'),
+        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('Força do perfil'), Text('$profileStrength%', style: const TextStyle(fontWeight: FontWeight.w800))]),
+        const SizedBox(height: 10), LinearProgressIndicator(value: profileStrength / 100, minHeight: 8, borderRadius: BorderRadius.circular(8)),
+        const SizedBox(height: 10), Text(profileStrength == 100 ? 'Dossiê completo.' : 'Complete os campos pendentes para fortalecer seu dossiê.'),
+      ])),
+      const SectionTitle(title: 'Resumo executivo'),
+      Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        _summaryRow(Icons.work_outline, 'Cargo-alvo', target.isEmpty ? 'Não informado' : target.join(', ')),
+        _summaryRow(Icons.location_on_outlined, 'Cidade/UF', locations.isEmpty ? 'Não informada' : locations.join(', ')),
+        _summaryRow(Icons.payments_outlined, 'Pretensão mínima', (num.tryParse('${preferences['min_salary'] ?? 0}') ?? 0) > 0 ? 'R\$ ${preferences['min_salary']}' : 'Não informada'),
       ])),
       const SectionTitle(title: 'Dados pessoais', subtitle: 'Informações profissionais para apresentar sua trajetória.'),
       Panel(child: Form(key: _profileKey, child: Column(children: [
@@ -96,12 +112,24 @@ class _CandidateProfileState extends State<CandidateProfile> {
         TextFormField(controller: _phone, enabled: !_busy, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Telefone com DDD', hintText: '+5511999999999', prefixIcon: Icon(Icons.phone_outlined)), validator: (value) => value != null && value.isNotEmpty && !RegExp(r'^\+55\d{10,11}$').hasMatch(value) ? 'Use +55, DDD e seu número, sem espaços.' : null),
         const SizedBox(height: 16),
         TextFormField(controller: _skills, enabled: !_busy, minLines: 2, maxLines: 4, decoration: const InputDecoration(labelText: 'Suas competências', hintText: 'Python, atendimento, Excel, gestão...', helperText: 'Separe as competências por vírgula.', prefixIcon: Icon(Icons.auto_awesome_outlined))),
+        if (skills.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 12), child: Wrap(spacing: 8, runSpacing: 4, children: [for (final skill in skills) Chip(visualDensity: VisualDensity.compact, label: Text(skill))])),
         const SizedBox(height: 20), SizedBox(width: double.infinity, child: FilledButton.icon(onPressed: _busy ? null : () { if (_profileKey.currentState!.validate()) { _perform(() async { await widget.api.request('PUT', '/me/profile', {'name': _name.text.trim(), 'phone': _phone.text.isEmpty ? null : _phone.text, 'skills': _terms(_skills.text)}); }, 'Perfil salvo com sucesso.'); } }, icon: const Icon(Icons.check), label: const Text('Salvar perfil'))),
       ]))),
       Panel(child: Row(children: [Icon(user['has_resume'] == true ? Icons.task_outlined : Icons.upload_file_outlined, size: 34, color: Brand.teal), const SizedBox(width: 14), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(user['has_resume'] == true ? 'Currículo pronto' : 'Apresente sua trajetória', style: Theme.of(context).textTheme.titleMedium), const Text('PDF privado · até 5 MB e 20 páginas')])), IconButton(onPressed: _busy ? null : _upload, tooltip: 'Enviar currículo PDF', icon: const Icon(Icons.file_upload_outlined))])),
+      const SectionTitle(title: 'Experiência e formação'),
+      Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Cursos declarados', style: TextStyle(fontWeight: FontWeight.w800)),
+        const SizedBox(height: 8),
+        if (courses.isEmpty) const Text('Nenhum curso informado. Os cursos concluídos são autodeclarados.'),
+        if (courses.isNotEmpty) Wrap(spacing: 8, children: [for (final course in courses) Chip(avatar: const Icon(Icons.school_outlined, size: 16), label: Text(course))]),
+        const SizedBox(height: 8),
+        const Text('Experiências profissionais podem ser apresentadas no currículo PDF.'),
+      ])),
       const SectionTitle(title: 'Meu Plano'),
       Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [Icon(premium ? Icons.workspace_premium : Icons.workspace_premium_outlined, color: premium ? Brand.coral : Brand.teal), const SizedBox(width: 10), Expanded(child: Text(premium ? 'Premium Ativo' : 'Plano Gratuito', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)))]),
+        const SizedBox(height: 8),
+        const Text('Vagou! Pro · buscas regionais, análise de compatibilidade e encaminhamento assistido.'),
         const SizedBox(height: 12),
         OutlinedButton.icon(onPressed: _busy ? null : _refreshAccess, icon: const Icon(Icons.refresh), label: const Text('Atualizar meu acesso')),
         const SizedBox(height: 8),
@@ -109,4 +137,12 @@ class _CandidateProfileState extends State<CandidateProfile> {
       ])),
     ]);
   }
+
+  Widget _summaryRow(IconData icon, String label, String value) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 7),
+    child: Row(children: [Icon(icon, color: Brand.teal), const SizedBox(width: 10),
+      Expanded(child: Text(label)), const SizedBox(width: 8),
+      Flexible(child: Text(value, textAlign: TextAlign.end, style: const TextStyle(fontWeight: FontWeight.w700))),
+    ]),
+  );
 }

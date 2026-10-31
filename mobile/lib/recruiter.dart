@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'api.dart';
 import 'jobs.dart';
 import 'ui.dart';
@@ -12,10 +13,15 @@ class RecruiterView extends StatefulWidget {
   State<RecruiterView> createState() => _RecruiterViewState();
 }
 class _RecruiterViewState extends State<RecruiterView> {
-  late Future<dynamic> data;
+  late Future<Map<String, dynamic>> data;
   @override
   void initState() { super.initState(); reload(); }
-  void reload() { data = widget.api.request('GET', '/recruiter/jobs'); }
+  void reload() {
+    data = Future.wait<dynamic>([
+      widget.api.request('GET', '/recruiter/jobs'),
+      widget.api.request('GET', '/recruiter/dashboard'),
+    ]).then((values) => {'jobs': values[0] as List, 'dashboard': Map<String, dynamic>.from(values[1] as Map)});
+  }
   Future<void> create() async {
     final created = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => JobEditor(api: widget.api, companyName: widget.user['company_name'] ?? widget.user['name'])));
     if (created == true && mounted) setState(reload);
@@ -26,30 +32,59 @@ class _RecruiterViewState extends State<RecruiterView> {
     try { await widget.api.request('DELETE', '/jobs/$id'); if (mounted) setState(reload); }
     catch (e) { if (mounted) await friendlyError(context, e); }
   }
+  Future<void> contact(String email) async {
+    final uri = Uri(scheme: 'mailto', path: email);
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication) && mounted) {
+      await friendlyError(context, const ApiException('Não foi possível abrir o aplicativo de e-mail.'));
+    }
+  }
   @override
-  Widget build(BuildContext context) => FutureBuilder<dynamic>(future: data, builder: (context, snapshot) {
+  Widget build(BuildContext context) => FutureBuilder<Map<String, dynamic>>(future: data, builder: (context, snapshot) {
     if (snapshot.connectionState != ConnectionState.done) return const Center(child: CircularProgressIndicator());
     if (snapshot.hasError) return EmptyState(icon: Icons.cloud_off_outlined, title: 'Vamos recuperar suas vagas', message: 'Não foi possível consultar as oportunidades publicadas.', onRetry: () => setState(reload));
-    final dynamic result = snapshot.data;
-    final List jobs = result is List ? result : (result['items'] as List? ?? []);
+    final result = snapshot.data!;
+    final List jobs = result['jobs'] as List;
+    final dashboard = Map<String, dynamic>.from(result['dashboard'] as Map);
+    final applicationsByJob = Map<String, dynamic>.from(dashboard['applications_by_job'] as Map? ?? const {});
     return RefreshIndicator(onRefresh: () async { setState(reload); await data; }, child: ListView(padding: const EdgeInsets.all(20), physics: const AlwaysScrollableScrollPhysics(), children: [
-      const SectionTitle(title: 'Talentos começam por uma boa oportunidade', subtitle: 'Publique com clareza e acompanhe a aprovação das suas vagas.'),
+      const SectionTitle(title: 'Central de Recrutamento', subtitle: 'Vagas, candidaturas e conversões em um só lugar.'),
+      LayoutBuilder(builder: (context, constraints) {
+        final width = (constraints.maxWidth - 12) / 2;
+        final metrics = [
+          ('Vagas ativas', '${dashboard['active_jobs'] ?? 0}', Icons.work_outline, Brand.teal),
+          ('Candidaturas', '${dashboard['total_applications'] ?? 0}', Icons.people_outline, Brand.navy),
+          ('Match forte', '${dashboard['strong_candidates'] ?? 0}', Icons.auto_awesome_outlined, Brand.coral),
+          ('Conversão', '${dashboard['conversion_rate'] ?? 0}%', Icons.trending_up, const Color(0xFFB88A28)),
+        ];
+        return Wrap(spacing: 12, runSpacing: 0, children: [for (final metric in metrics)
+          SizedBox(width: width, child: Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Icon(metric.$3, color: metric.$4), const SizedBox(height: 10),
+            Text(metric.$2, style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w900)),
+            Text(metric.$1),
+          ]))),
+        ]);
+      }),
       Panel(child: Wrap(spacing: 8, runSpacing: 8, children: [
         Chip(avatar: const Icon(Icons.schedule_outlined, size: 16), label: Text('Em análise: ${jobs.where((j) => j['active'] == true && j['moderation_status'] == 'pending').length}')),
         Chip(avatar: const Icon(Icons.verified_outlined, size: 16), label: Text('Aprovadas: ${jobs.where((j) => j['active'] == true && j['moderation_status'] == 'approved').length}')),
         Chip(avatar: const Icon(Icons.error_outline, size: 16), label: Text('Reprovadas: ${jobs.where((j) => j['active'] == true && j['moderation_status'] == 'rejected').length}')),
         Chip(avatar: const Icon(Icons.archive_outlined, size: 16), label: Text('Encerradas: ${jobs.where((j) => j['active'] == false).length}')),
       ])),
-      FilledButton.icon(onPressed: create, icon: const Icon(Icons.add), label: const Text('Criar nova vaga')),
-      const SizedBox(height: 20), Panel(child: Row(children: [const Icon(Icons.verified_user_outlined, color: Brand.teal), const SizedBox(width: 12), Expanded(child: Text('Todas as vagas passam por moderação antes de aparecer no feed.', style: Theme.of(context).textTheme.bodyMedium))])),
+      FilledButton.icon(onPressed: create, icon: const Icon(Icons.add), label: const Text('Publicar oportunidade')),
+      const SizedBox(height: 8), const Text('Vagas aguardando aprovação não recebem candidaturas.'),
       if (jobs.isEmpty) const EmptyState(icon: Icons.work_outline, title: 'Sua próxima contratação começa aqui', message: 'Crie sua primeira vaga para se conectar aos candidatos.'),
       for (final job in jobs) Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [Expanded(child: Text(job['title'], style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold))), Icon(job['active'] == true ? Icons.work_outline : Icons.archive_outlined, color: Brand.teal)]),
-        const SizedBox(height: 10), Text('${modalityLabel(job['modality'])} · ${job['location']}'),
-        const SizedBox(height: 10), Chip(avatar: Icon(job['moderation_status'] == 'approved' ? Icons.check_circle_outline : Icons.schedule, size: 18), label: Text(job['active'] == false ? 'Encerrada' : statusLabel(job['moderation_status'] ?? 'pending'))),
+        Row(children: [Expanded(child: Text(job['title'], style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold))), Chip(avatar: Icon(job['moderation_status'] == 'approved' ? Icons.check_circle_outline : Icons.schedule, size: 18), label: Text(job['active'] == false ? 'Encerrada' : statusLabel(job['moderation_status'] ?? 'pending')))]),
+        const SizedBox(height: 8), Text('${job['company']} · ${modalityLabel(job['modality'])} · ${job['location']}'),
+        const SizedBox(height: 6), Text(job['contract_type'] == null ? 'Contrato não informado' : 'Contrato: ${job['contract_type']}'),
+        Text((num.tryParse('${job['salary_min']}') ?? 0) == 0 && (num.tryParse('${job['salary_max']}') ?? 0) == 0 ? 'Salário não informado' : 'R\$ ${job['salary_min']} – R\$ ${job['salary_max']}'),
+        const SizedBox(height: 6), Text('${applicationsByJob['${job['id']}'] ?? 0} candidaturas recebidas'),
         Text('Publicada em ${formatDate(job['created_at'])}'),
         if (job['moderation_status'] == 'rejected') Padding(padding: const EdgeInsets.only(top: 8), child: Text(job['moderation_note']?.toString().trim().isNotEmpty == true ? job['moderation_note'].toString() : 'Esta publicação não foi aprovada. Consulte o atendimento antes de republicar.')),
-        if (job['active'] == true) Align(alignment: Alignment.centerRight, child: TextButton(onPressed: () => close(job['id'].toString()), child: const Text('Encerrar vaga'))),
+        Wrap(spacing: 8, children: [
+          OutlinedButton.icon(onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => RecruiterApplications(api: widget.api))), icon: const Icon(Icons.people_outline), label: const Text('Ver candidatos')),
+          if (job['active'] == true) TextButton.icon(onPressed: () => close(job['id'].toString()), icon: const Icon(Icons.archive_outlined), label: const Text('Encerrar')),
+        ]),
       ])),
     ]));
   });
@@ -195,12 +230,21 @@ class _RecruiterApplicationsState extends State<RecruiterApplications> {
       for (final row in rows) Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(row['candidate_name'] ?? 'Candidato', style: Theme.of(context).textTheme.titleLarge), const SizedBox(height: 6),
         Text(row['job_title'] ?? 'Oportunidade', style: Theme.of(context).textTheme.titleMedium), const SizedBox(height: 8),
-        Text('Compatibilidade técnica: ${row['match_score']}% · Modalidade: ${row['work_style_fit'] == 'aligned' ? 'alinhada' : row['work_style_fit'] == 'different' ? 'diferente' : 'não informada'}'),
+        Wrap(spacing: 8, runSpacing: 4, children: [Chip(avatar: const Icon(Icons.auto_awesome, size: 16), label: Text('${row['match_score']}% Match')), Chip(label: Text(row['status'] == 'submitted' ? 'Nova candidatura' : statusLabel('${row['status']}')))]),
+        Text('Modalidade: ${row['work_style_fit'] == 'aligned' ? 'alinhada' : row['work_style_fit'] == 'different' ? 'diferente' : 'não informada'}'),
         const SizedBox(height: 4), Text('Localidade: ${(row['preferred_locations'] as List? ?? []).join(', ')} · Pretensão: R\$ ${row['salary_expectation'] ?? 'não informada'}'),
+        const SizedBox(height: 8),
+        if ((row['candidate_skills'] as List? ?? []).isNotEmpty) Wrap(spacing: 6, runSpacing: 2, children: [for (final skill in (row['candidate_skills'] as List).take(8)) Chip(visualDensity: VisualDensity.compact, label: Text('$skill'))]),
+        if (row['candidate_email'] != null) TextButton.icon(onPressed: () => contact('${row['candidate_email']}'), icon: const Icon(Icons.mail_outline), label: Text('${row['candidate_email']}')),
+        if (row['candidate_phone'] != null) SelectableText('Telefone: ${row['candidate_phone']}'),
         const SizedBox(height: 4), Text('Cursos informados: ${(row['completed_course_ids'] as List? ?? []).isEmpty ? 'nenhum' : (row['completed_course_ids'] as List).join(', ')} (autodeclarados)'),
         const SizedBox(height: 6), Text(formatDate(row['created_at'])), const SizedBox(height: 12),
         OutlinedButton.icon(onPressed: downloading != null ? null : () => saveResume(row['id'].toString()), icon: downloading == row['id'] ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.download_outlined), label: const Text('Salvar currículo PDF')), const SizedBox(height: 12),
-        DropdownButtonFormField<String>(initialValue: row['status'], decoration: const InputDecoration(labelText: 'Etapa do processo'), items: [for (final value in ['submitted', 'reviewing', 'interview', 'rejected', 'hired']) DropdownMenuItem(value: value, child: Text(statusLabel(value)))], onChanged: changing == row['id'] ? null : (v) { if (v != null && v != 'submitted') update(row['id'], v); }),
+        Wrap(spacing: 8, runSpacing: 4, children: [
+          OutlinedButton(onPressed: changing == row['id'] ? null : () => update(row['id'].toString(), 'reviewing'), child: const Text('Em análise')),
+          OutlinedButton(onPressed: changing == row['id'] ? null : () => update(row['id'].toString(), 'interview'), child: const Text('Aprovar p/ entrevista')),
+          TextButton(onPressed: changing == row['id'] ? null : () => update(row['id'].toString(), 'rejected'), child: const Text('Descartar')),
+        ]),
       ])),
       if (rows.length == 100) const Text('Exibindo até 100 candidaturas por consulta. Refine os filtros para localizar outros perfis.'),
     ]));

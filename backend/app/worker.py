@@ -60,17 +60,7 @@ async def automate(candidate_id=None, force=False, run_id=None, progress=None):
     engine = create_async_engine(settings().database_url, pool_pre_ping=True)
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     submitted = 0
-    collected_jobs = 0
     try:
-        if force:
-            search_preferences = {}
-            if candidate_id:
-                async with sessions() as db:
-                    candidate = await db.get(User, candidate_id)
-                    if candidate:
-                        search_preferences = candidate.preferences or {}
-            collection = await refresh_job_sources(search_preferences)
-            collected_jobs = collection['collected_jobs']
         allowed_test_emails = premium_test_emails()
         cursor = None
         while True:
@@ -86,6 +76,23 @@ async def automate(candidate_id=None, force=False, run_id=None, progress=None):
                 if not ids:
                     break
             for user_id in ids:
+                collected_jobs = failed_sources = 0
+                if settings().enable_public_collectors:
+                    async with sessions() as db:
+                        snapshot = await db.get(User, user_id)
+                        search_preferences = snapshot.preferences or {} if snapshot else {}
+                        interval_minutes = search_preferences.get('automation_interval_minutes', 60)
+                        interval_minutes = max(15, min(1440, interval_minutes)) if isinstance(interval_minutes, int) else 60
+                        latest_run = await db.scalar(select(AutomationRun.started_at).where(AutomationRun.candidate_id == user_id)
+                            .order_by(AutomationRun.started_at.desc()).limit(1))
+                        due = force or not latest_run or latest_run <= datetime.now(timezone.utc) - timedelta(minutes=interval_minutes)
+                    if due:
+                        try:
+                            collection = await refresh_job_sources(search_preferences)
+                            collected_jobs = collection['collected_jobs']
+                            failed_sources = collection['failed_sources']
+                        except Exception:
+                            failed_sources = 1
                 try:
                     async with sessions.begin() as db:
                         user = await db.scalar(select(User).where(User.id == user_id).with_for_update(skip_locked=True))
@@ -117,6 +124,9 @@ async def automate(candidate_id=None, force=False, run_id=None, progress=None):
                             await db.flush()
                         else:
                             run.collected_jobs = collected_jobs
+                        if failed_sources:
+                            run.error_count += failed_sources
+                            event(db, run, 'failed', f'{failed_sources} fonte(s) pública(s) indisponível(is); a varredura local continuará.')
                         run.status = 'running'
                         if not user.resume_key:
                             event(db, run, 'missing_resume', 'Envie um currículo PDF para ativar os envios automáticos.')
@@ -209,9 +219,13 @@ async def automate(candidate_id=None, force=False, run_id=None, progress=None):
 
 async def refresh_job_sources(preferences: dict | None = None):
     cfg = settings()
+    if not cfg.enable_public_collectors:
+        return {'imported': 0, 'collected_jobs': 0, 'failed_sources': 0,
+            'configured': False, 'enabled': False}
     has_gupy_query = bool(preferences and (preferences.get('titles') or preferences.get('keywords')))
     if not cfg.job_source_urls and not has_gupy_query:
-        return {'imported': 0, 'collected_jobs': 0, 'failed_sources': 0, 'configured': False}
+        return {'imported': 0, 'collected_jobs': 0, 'failed_sources': 0,
+            'configured': False, 'enabled': True}
     engine = create_async_engine(cfg.database_url, pool_pre_ping=True)
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     imported = collected = 0

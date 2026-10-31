@@ -15,6 +15,18 @@ def location_matches(job_location: str, preferred_location: str) -> bool:
     return job_key == preferred_key or job_key.startswith(f'{preferred_key} ') or job_key.endswith(f' {preferred_key}')
 
 
+def remote_region_allowed(job_location: str) -> bool:
+    scope = normalize(job_location)
+    if not scope or any(term in scope for term in ('worldwide', 'anywhere', 'global', 'qualquer lugar', 'todo o mundo')):
+        return True
+    if any(term in scope for term in ('brasil', 'brazil')):
+        return True
+    foreign_regions = ('united states', 'usa', 'u.s.', 'canada', 'europe', 'european',
+        'united kingdom', 'uk ', 'australia', 'singapore', 'mexico', 'saudi arabia',
+        'germany', 'france', 'spain', 'portugal', 'india', 'asia', 'africa')
+    return not any(term in scope for term in foreign_regions)
+
+
 def match(skills: list[str], required: list[str]) -> dict:
     available = {normalize(x) for x in skills}
     requirements = {normalize(x) for x in required if normalize(x)}
@@ -59,7 +71,8 @@ def evaluate_job(job, skills: list[str], preferences: dict) -> dict:
 
     locations = preferences.get('locations') or []
     if locations:
-        location_match = job.modality == 'remote' or any(location_matches(job.location, value) for value in locations)
+        location_match = any(location_matches(job.location, value) for value in locations)
+        location_match = location_match or (job.modality == 'remote' and remote_region_allowed(job.location))
         components.append((0.10, 100 if location_match else 0))
         (reasons if location_match else missed).append(
             'Localização compatível.' if location_match else 'Vaga fora da Cidade/UF selecionada.')
@@ -115,7 +128,9 @@ def filter_reason(job, preferences: dict) -> str | None:
         searchable = normalize(' '.join([job.title, job.description, *(job.keywords or [])]))
         if not any(keyword in searchable for keyword in keywords):
             return 'Palavras-chave não encontradas.'
-    if job.modality != 'remote' and preferences.get('locations'):
-        if not any(location_matches(job.location, value) for value in preferences['locations']):
+    if preferences.get('locations'):
+        location_match = any(location_matches(job.location, value) for value in preferences['locations'])
+        location_match = location_match or (job.modality == 'remote' and remote_region_allowed(job.location))
+        if not location_match:
             return 'Localização fora da região selecionada.'
     return None

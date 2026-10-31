@@ -18,6 +18,7 @@ class _JobsViewState extends State<JobsView> {
   String category = 'high';
   Object? error;
   Map<String, dynamic> user = {}, preferences = {};
+  Map<String, dynamic> collectorStatus = {};
   final Set<String> pending = {}, applied = {};
   @override
   void initState() { super.initState(); load(); _loadAccount(); }
@@ -53,6 +54,7 @@ class _JobsViewState extends State<JobsView> {
         if (!more) items.clear();
         items.addAll((result['items'] as List).map((e) => Map<String, dynamic>.from(e)));
         next = result['next_offset'] as int?;
+        collectorStatus = Map<String, dynamic>.from(result['collector_status'] as Map? ?? const {});
       });
     } catch (e) { if (mounted) setState(() => error = e); }
     finally { if (mounted) setState(() { loading = false; loadingMore = false; }); }
@@ -109,6 +111,9 @@ class _JobsViewState extends State<JobsView> {
       SegmentedButton<String>(segments: const [ButtonSegment(value: 'high', label: Text('Match alto'), icon: Icon(Icons.bolt)), ButtonSegment(value: 'observation', label: Text('Possíveis vagas'), icon: Icon(Icons.travel_explore))], selected: {category}, onSelectionChanged: (v) => setState(() => category = v.first)),
       const SizedBox(height: 18),
       if (category == 'observation') const Padding(padding: EdgeInsets.only(bottom: 16), child: Text('Vagas próximas do seu perfil, com 50% a 75% de compatibilidade. Conheça as lacunas e decida se faz sentido se candidatar.')),
+      if ((collectorStatus['failed_sources'] as num? ?? 0) > 0) Panel(child: Row(children: [const Icon(Icons.sync_problem_outlined, color: Brand.coral), const SizedBox(width: 10), Expanded(child: Text('${collectorStatus['failed_sources']} fonte(s) externa(s) não responderam. As demais fontes e vagas disponíveis foram mantidas.'))])),
+      if (visible.isEmpty && collectorStatus['configured'] == false) const Panel(child: Text('Configure um cargo ou palavras-chave nas preferências para consultar a Gupy; feeds extras dependem de fontes públicas autorizadas.')),
+      if (visible.isEmpty && collectorStatus['configured'] == true && (collectorStatus['failed_sources'] as num? ?? 0) == 0) const Panel(child: Text('As fontes consultadas não retornaram vagas aprovadas compatíveis agora. Tente novamente mais tarde ou ajuste os filtros.')),
       if (visible.isEmpty) const Panel(child: EmptyState(icon: Icons.manage_search, title: 'Vamos explorar novas possibilidades?', message: 'Nenhuma vaga desta página se encaixa nesta categoria. Confira seus critérios no perfil ou carregue mais oportunidades.')),
       for (final item in visible) _jobCard(item),
       if (error != null) OutlinedButton.icon(onPressed: () => load(more: true), icon: const Icon(Icons.refresh), label: const Text('Tentar carregar novamente')),

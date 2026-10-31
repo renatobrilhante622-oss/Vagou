@@ -22,6 +22,9 @@ class MatchingTests(unittest.TestCase):
         preferences = {'min_salary': 5000, 'titles': ['python'], 'modalities': ['remote'], 'locations': ['Recife']}
         self.assertTrue(eligible(job, preferences))
         self.assertFalse(eligible(job, {**preferences, 'min_salary': 7000}))
+        job.location = 'Europe, USA, Canada'
+        self.assertFalse(eligible(job, preferences))
+        job.location = 'São Paulo'
         self.assertTrue(eligible(job, {**preferences, 'contract_types': ['clt'], 'keywords': ['contrato']}))
         self.assertFalse(eligible(job, {**preferences, 'contract_types': ['pj']}))
         self.assertFalse(eligible(job, {**preferences, 'keywords': ['cobol']}))

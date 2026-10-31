@@ -59,3 +59,34 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual((job.title, job.company, job.location), ('Analista Python', 'Empresa Gupy', 'Brasília, DF'))
         self.assertEqual((job.modality, job.contract_type, job.salary_min, job.salary_max), ('hybrid', 'clt', 4000, 6500))
         self.assertEqual(job.source_url, 'https://empresa.gupy.io/jobs/42')
+
+    def test_public_sources_are_independent_when_gupy_is_unavailable(self):
+        original = httpx.AsyncClient
+        remotive = {'jobs': [{'id': 7, 'title': 'Python Developer', 'company_name': 'Remote Co',
+            'description': 'Build and maintain Python APIs with a distributed product team.',
+            'url': 'https://jobs.remotive.com/7', 'tags': ['Python'],
+            'candidate_required_location': 'Worldwide'}]}
+        arbeitnow = {'data': [{'slug': 'data-8', 'title': 'Data Analyst', 'company_name': 'Data Co',
+            'description': 'Analyze data and communicate insights to a cross-functional team.',
+            'url': 'https://www.arbeitnow.com/jobs/data-8', 'tags': ['SQL'], 'remote': True,
+            'location': 'Worldwide'}]}
+
+        async def scenario():
+            def factory(**kwargs):
+                def respond(request):
+                    if request.url.host == 'portal.api.gupy.io':
+                        return httpx.Response(404)
+                    payload = remotive if request.url.host == 'remotive.com' else arbeitnow
+                    return httpx.Response(200, headers={'content-type': 'application/json'},
+                        content=json.dumps(payload).encode())
+                return original(**kwargs, transport=httpx.MockTransport(respond))
+
+            with patch('app.collectors.httpx.AsyncClient', side_effect=factory):
+                sources, failures = await collect_authorized_sources([], [], 4096, 20,
+                    preferences={'titles': ['Python'], 'locations': ['Brasília / DF']})
+            return sources, failures
+
+        sources, failures = asyncio.run(scenario())
+        self.assertEqual({source.name for source in sources}, {'Remotive', 'Arbeitnow'})
+        self.assertEqual(failures, 1)
+        self.assertTrue(all(source.jobs and source.auto_approve for source in sources))

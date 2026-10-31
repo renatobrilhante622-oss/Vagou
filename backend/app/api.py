@@ -1,5 +1,6 @@
 import asyncio
 import io
+import logging
 import os
 import uuid
 from datetime import datetime, timezone
@@ -7,7 +8,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, UploadFile
 from fastapi.responses import StreamingResponse
 from pypdf import PdfReader
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -21,6 +22,7 @@ from app.security import cipher, current_user, role, verify_password
 from app.services import apply, private_storage
 
 router = APIRouter(prefix='/v1')
+logger = logging.getLogger('uvicorn.error')
 Candidate = Depends(role('candidate'))
 Recruiter = Depends(role('recruiter'))
 DB = Depends(session)
@@ -171,15 +173,27 @@ async def download_resume(user: User = Candidate):
 async def create_job(payload: JobCreate, user: User = Recruiter, db: AsyncSession = DB):
     job = Job(**payload.model_dump(), recruiter_id=user.id, moderation_status='pending')
     db.add(job)
+    import logging
     await db.commit()
     await db.refresh(job)
     return job
 
 
 @router.get('/jobs', response_model=list[PublicJobOut])
-async def jobs(offset: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=100), db: AsyncSession = DB):
+async def jobs(offset: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=100),
+               title: str | None = Query(None, max_length=160), city: str | None = Query(None, max_length=80),
+               state: str | None = Query(None, min_length=2, max_length=8),
+               keywords: list[str] = Query(default=[], max_length=10), db: AsyncSession = DB):
+    from app.worker import refresh_job_sources
+    preferences = {'titles': [title] if title else [], 'keywords': keywords,
+        'locations': [f'{city} / {state}' if state else city] if city else []}
+    try:
+        await refresh_job_sources(preferences)
+    except Exception as error:
+        logger.error('public_job_sync_failed error_type=%s', type(error).__name__)
     return (await db.scalars(select(Job).where(Job.active.is_(True), Job.moderation_status == 'approved').order_by(Job.created_at.desc(), Job.id).offset(offset).limit(limit))).all()
 
+    logger = logging.getLogger('uvicorn.error')
 
 @router.get('/jobs/{job_id}', response_model=PublicJobOut)
 async def job_detail(job_id: uuid.UUID, db: AsyncSession = DB):
@@ -201,6 +215,13 @@ async def close_job(job_id: uuid.UUID, user: User = Recruiter, db: AsyncSession 
 
 @router.get('/matches')
 async def matches(offset: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=100), user: User = Candidate, db: AsyncSession = DB):
+    from app.worker import refresh_job_sources
+    collector_status = {'enabled': settings().enable_public_collectors, 'collected_jobs': 0, 'failed_sources': 0, 'configured': False}
+    try:
+        collector_status = await refresh_job_sources(user.preferences or {})
+    except Exception as error:
+        logger.error('candidate_match_source_sync_failed error_type=%s', type(error).__name__)
+        collector_status['failed_sources'] = 1
     # Pagination is over active jobs examined; filters can make a page shorter.
     rows = (await db.scalars(select(Job).where(Job.active.is_(True), Job.moderation_status == 'approved').order_by(Job.created_at.desc(), Job.id).offset(offset).limit(limit))).all()
     items = []
@@ -212,7 +233,8 @@ async def matches(offset: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=
         items.append({'job': PublicJobOut.model_validate(job).model_dump(mode='json'),
             **skill_match, 'match_score': preference_match['match_score'],
             'match_reasons': preference_match['match_reasons'] + preference_match['missed_reasons']})
-    return {'items': items, 'next_offset': offset + len(rows) if len(rows) == limit else None}
+    return {'items': items, 'next_offset': offset + len(rows) if len(rows) == limit else None,
+        'collector_status': collector_status}
 
 
 @router.post('/jobs/{job_id}/applications')
@@ -304,6 +326,9 @@ async def recruiter_applicants(
             if matched >= offset:
                 items.append({
                     'id': application.id, 'candidate_name': candidate.name,
+                    'candidate_email': candidate.email,
+                    'candidate_phone': cipher().decrypt(candidate.phone_encrypted.encode()).decode() if candidate.phone_encrypted else None,
+                    'candidate_skills': candidate.skills or [],
                     'job_id': job.id, 'job_title': job.title, 'status': application.status,
                     'match_score': application.match_score, 'created_at': application.created_at,
                     'preferred_locations': places, 'salary_expectation': prefs.get('min_salary'),
@@ -320,6 +345,26 @@ async def recruiter_applicants(
             'filters_applied': {'min_match': min_match, 'location': location,
                                 'salary_ceiling': salary_ceiling,
                                 'completed_course_id': completed_course_id, 'work_style': work_style}}
+
+
+@router.get('/recruiter/dashboard')
+async def recruiter_dashboard(user: User = Recruiter, db: AsyncSession = DB):
+    active_jobs = await db.scalar(select(func.count(Job.id)).where(
+        Job.recruiter_id == user.id, Job.active.is_(True))) or 0
+    totals = (await db.execute(select(
+        func.count(Application.id),
+        func.sum(case((Application.match_score >= 70, 1), else_=0)),
+        func.sum(case((Application.status.in_(['interview', 'hired']), 1), else_=0)),
+    ).join(Job, Job.id == Application.job_id).where(Job.recruiter_id == user.id))).one()
+    applications_count = int(totals[0] or 0)
+    strong_candidates = int(totals[1] or 0)
+    converted = int(totals[2] or 0)
+    job_rows = (await db.execute(select(Application.job_id, func.count(Application.id)).join(
+        Job, Job.id == Application.job_id).where(Job.recruiter_id == user.id).group_by(Application.job_id))).all()
+    return {'active_jobs': int(active_jobs), 'total_applications': applications_count,
+        'strong_candidates': strong_candidates,
+        'conversion_rate': round(converted * 100 / applications_count, 1) if applications_count else 0,
+        'applications_by_job': {str(job_id): count for job_id, count in job_rows}}
 
 
 @router.get('/notifications')

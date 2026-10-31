@@ -1,15 +1,22 @@
 """Concurrent collection from the public Gupy API and approved job feeds."""
 import asyncio
 import hashlib
+import json
 import re
 from dataclasses import dataclass
+from time import monotonic
 from urllib.parse import urlsplit
 
 import httpx
 
-from app.job_sources import ExternalJob, FeedError, amount, fetch_feed, plain, public_https_url
+from app.job_sources import ExternalJob, FeedError, amount, fetch_feed, parse_feed, plain, public_https_url
 
 GUPY_API_URL = 'https://portal.api.gupy.io/api/v1/jobs'
+REMOTIVE_API_URL = 'https://remotive.com/api/remote-jobs'
+ARBEITNOW_API_URL = 'https://www.arbeitnow.com/api/job-board-api'
+PUBLIC_SOURCE_CACHE_SECONDS = 90
+_source_cache = {}
+_cache_lock = asyncio.Lock()
 
 
 @dataclass(frozen=True)
@@ -123,10 +130,64 @@ async def collect_gupy(preferences: dict, max_jobs: int = 20) -> CollectedSource
     return CollectedSource('Gupy', parse_gupy_response(payload, max_jobs), auto_approve=True)
 
 
+async def _public_json(client: httpx.AsyncClient, url: str, params: dict | None = None,
+                       max_bytes: int = 2 * 1024 * 1024) -> dict:
+    response = await client.get(url, params=params)
+    response.raise_for_status()
+    if len(response.content) > max_bytes:
+        raise FeedError('A fonte pública excedeu o limite de tamanho.')
+    try:
+        result = response.json()
+    except ValueError:
+        raise FeedError('A fonte pública retornou JSON inválido.') from None
+    if not isinstance(result, dict):
+        raise FeedError('A fonte pública retornou um formato inesperado.')
+    return result
+
+
+async def collect_remotive(preferences: dict, max_jobs: int = 20) -> CollectedSource:
+    query = ' '.join([*(preferences.get('titles') or []), *(preferences.get('keywords') or [])])[:180]
+    headers = {'Accept': 'application/json', 'User-Agent': 'Vagou-AuthorizedJobSearch/1.0'}
+    async with httpx.AsyncClient(timeout=httpx.Timeout(8.0), follow_redirects=False, headers=headers) as client:
+        payload = await _public_json(client, REMOTIVE_API_URL, {'search': query, 'limit': max_jobs})
+    jobs = parse_feed({'jobs': payload.get('jobs', [])}, max_jobs=max_jobs)
+    return CollectedSource('Remotive', [ExternalJob(job.source_external_id, job.title, job.company,
+        job.description, job.location, 'remote', job.keywords, job.salary_min, job.salary_max,
+        job.contract_type, job.source_url) for job in jobs], auto_approve=True)
+
+
+async def collect_arbeitnow(preferences: dict, max_jobs: int = 20) -> CollectedSource:
+    headers = {'Accept': 'application/json', 'User-Agent': 'Vagou-AuthorizedJobSearch/1.0'}
+    async with httpx.AsyncClient(timeout=httpx.Timeout(8.0), follow_redirects=False, headers=headers) as client:
+        payload = await _public_json(client, ARBEITNOW_API_URL, {'page': 1}, max_bytes=4 * 1024 * 1024)
+    records = payload.get('data', [])
+    if not isinstance(records, list):
+        raise FeedError('A fonte Arbeitnow retornou uma lista inválida.')
+    normalized = []
+    for record in records[:max_jobs]:
+        if not isinstance(record, dict):
+            continue
+        remote = bool(record.get('remote'))
+        normalized.append({
+            'id': record.get('slug') or record.get('id') or record.get('url'),
+            'url': record.get('url'), 'title': record.get('title'),
+            'company_name': record.get('company_name'), 'description': record.get('description'),
+            'location': record.get('location') or 'Não informada',
+            'modality': 'remote' if remote else 'onsite', 'tags': record.get('tags') or [],
+            'salary_min': record.get('salary_min'), 'salary_max': record.get('salary_max'),
+        })
+    return CollectedSource('Arbeitnow', parse_feed({'jobs': normalized}, max_jobs=max_jobs), auto_approve=True)
+
+
 async def collect_authorized_sources(urls: list[str], allowed_hosts: list[str],
                                     max_bytes: int, max_jobs: int,
                                     concurrency: int = 4,
                                     preferences: dict | None = None) -> tuple[list[CollectedSource], int]:
+    cache_key = json.dumps([urls, sorted(allowed_hosts), max_bytes, max_jobs, preferences or {}], sort_keys=True)
+    async with _cache_lock:
+        cached = _source_cache.get(cache_key)
+        if cached and cached[0] > monotonic():
+            return cached[1], cached[2]
     semaphore = asyncio.Semaphore(max(1, min(concurrency, 8)))
 
     async def collect(url: str):
@@ -139,12 +200,22 @@ async def collect_authorized_sources(urls: list[str], allowed_hosts: list[str],
 
     tasks = [collect(url) for url in urls[:20]]
     if preferences:
-        async def collect_gupy_safely():
+        async def collect_builtin(collector):
             try:
-                return await collect_gupy(preferences, max_jobs=20)
+                return await collector(preferences, max_jobs=20)
             except Exception:
                 return None
-        tasks.append(collect_gupy_safely())
+        tasks.extend([collect_builtin(collect_gupy), collect_builtin(collect_remotive),
+            collect_builtin(collect_arbeitnow)])
     results = await asyncio.gather(*tasks)
     sources = [result for result in results if result is not None]
-    return sources, len(results) - len(sources)
+    failures = len(results) - len(sources)
+    async with _cache_lock:
+        _source_cache[cache_key] = (monotonic() + PUBLIC_SOURCE_CACHE_SECONDS, sources, failures)
+        for key, value in list(_source_cache.items()):
+            if value[0] <= monotonic():
+                _source_cache.pop(key, None)
+        while len(_source_cache) > 128:
+            oldest = min(_source_cache, key=lambda key: _source_cache[key][0])
+            _source_cache.pop(oldest, None)
+    return sources, failures
