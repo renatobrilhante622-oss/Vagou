@@ -11,6 +11,7 @@ from app.company import valid_cnpj, normalize_cnpj
 Password = Annotated[str, StringConstraints(strip_whitespace=False)]
 Role = Literal['candidate', 'recruiter']
 Modality = Literal['remote', 'hybrid', 'onsite']
+ContractType = Literal['clt', 'pj', 'internship', 'temporary', 'apprentice', 'other']
 
 
 def normalize_br_phone(value: str | None) -> str | None:
@@ -97,19 +98,25 @@ class ProfileUpdate(Skills):
 
 class Preferences(StrictModel):
     titles: list[str] = Field(default_factory=list, max_length=20)
+    keywords: list[str] = Field(default_factory=list, max_length=30)
     min_salary: float = Field(default=0, ge=0, le=1000000, allow_inf_nan=False)
     modalities: list[Modality] = Field(default_factory=list, max_length=3)
     locations: list[str] = Field(default_factory=list, max_length=20)
+    contract_types: list[ContractType] = Field(default_factory=list, max_length=6)
     completed_course_ids: list[str] = Field(default_factory=list, max_length=50)
-    automation_enabled: bool = False
-    automation_max_applications_per_run: int = Field(default=20, ge=1, le=100)
-    automation_interval_minutes: int = Field(default=60, ge=15, le=1440)
+    automation_enabled: bool | None = False
+    automation_max_applications_per_run: int | None = Field(default=20, ge=1, le=100)
+    automation_interval_minutes: int | None = Field(default=60, ge=15, le=1440)
 
-    @model_validator(mode='after')
-    def onsite_location_required(self):
-        if any(modality in ['onsite', 'hybrid'] for modality in self.modalities) and not self.locations:
-            raise ValueError('Informe a cidade e o estado para vagas presenciais ou híbridas.')
-        return self
+    @field_validator('min_salary', mode='before')
+    @classmethod
+    def empty_salary_is_optional(cls, value):
+        return 0 if value is None or value == '' else value
+
+    @field_validator('modalities', 'titles', 'keywords', 'locations', 'contract_types', 'completed_course_ids', mode='before')
+    @classmethod
+    def empty_lists_are_optional(cls, value):
+        return [] if value is None else value
 
     @field_validator('completed_course_ids')
     @classmethod
@@ -120,7 +127,7 @@ class Preferences(StrictModel):
             raise ValueError('Selecione somente cursos disponíveis no catálogo Vagou!.')
         return list(dict.fromkeys(value))
 
-    @field_validator('titles', 'locations')
+    @field_validator('titles', 'locations', 'keywords')
     @classmethod
     def valid_terms(cls, value):
         if any(not x.strip() or len(x) > 160 for x in value):
@@ -135,6 +142,7 @@ class JobCreate(StrictModel):
     salary_min: float = Field(ge=0, le=1000000, allow_inf_nan=False)
     salary_max: float = Field(ge=0, le=1000000, allow_inf_nan=False)
     modality: Modality
+    contract_type: ContractType | None = None
     location: str = Field(min_length=2, max_length=160)
     keywords: list[str] = Field(min_length=1, max_length=100)
 

@@ -65,7 +65,7 @@ class JobEditor extends StatefulWidget {
 class _JobEditorState extends State<JobEditor> {
   final form = GlobalKey<FormState>();
   final title = TextEditingController(), description = TextEditingController(), min = TextEditingController(), max = TextEditingController(), city = TextEditingController(), state = TextEditingController(), skills = TextEditingController();
-  String modality = 'remote';
+  String modality = 'remote', contractType = 'clt';
   bool busy = false;
   @override
   void dispose() { for (final c in [title, description, min, max, city, state, skills]) { c.dispose(); } super.dispose(); }
@@ -76,7 +76,7 @@ class _JobEditorState extends State<JobEditor> {
       await widget.api.request('POST', '/jobs', {
         'title': title.text.trim(), 'company': widget.companyName, 'description': description.text.trim(),
         'salary_min': double.parse(min.text.replaceAll(',', '.')), 'salary_max': double.parse(max.text.replaceAll(',', '.')),
-        'modality': modality, 'location': modality == 'remote' ? 'Brasil' : '${city.text.trim()} / ${state.text.trim().toUpperCase()}',
+        'modality': modality, 'contract_type': contractType, 'location': modality == 'remote' ? 'Brasil' : '${city.text.trim()} / ${state.text.trim().toUpperCase()}',
         'keywords': skills.text.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList(),
       });
       if (!mounted) return;
@@ -93,6 +93,7 @@ class _JobEditorState extends State<JobEditor> {
     field(min, 'Salário mínimo (R\$)', type: const TextInputType.numberWithOptions(decimal: true), validator: (v) => (double.tryParse((v ?? '').replaceAll(',', '.')) ?? -1) < 0 ? 'Informe um valor válido.' : null),
     field(max, 'Salário máximo (R\$)', type: const TextInputType.numberWithOptions(decimal: true), validator: (v) { final value = double.tryParse((v ?? '').replaceAll(',', '.')); final low = double.tryParse(min.text.replaceAll(',', '.')) ?? 0; return value == null || value < low ? 'O máximo deve ser maior ou igual ao mínimo.' : null; }),
     DropdownButtonFormField<String>(initialValue: modality, decoration: const InputDecoration(labelText: 'Modalidade'), items: const [DropdownMenuItem(value: 'remote', child: Text('Remoto')), DropdownMenuItem(value: 'hybrid', child: Text('Híbrido')), DropdownMenuItem(value: 'onsite', child: Text('Presencial'))], onChanged: busy ? null : (v) => setState(() => modality = v!)), const SizedBox(height: 16),
+    DropdownButtonFormField<String>(initialValue: contractType, decoration: const InputDecoration(labelText: 'Tipo de contrato'), items: const [DropdownMenuItem(value: 'clt', child: Text('CLT')), DropdownMenuItem(value: 'pj', child: Text('PJ')), DropdownMenuItem(value: 'internship', child: Text('Estágio')), DropdownMenuItem(value: 'temporary', child: Text('Temporário')), DropdownMenuItem(value: 'apprentice', child: Text('Aprendiz')), DropdownMenuItem(value: 'other', child: Text('Outro'))], onChanged: busy ? null : (v) => setState(() => contractType = v!)), const SizedBox(height: 16),
     if (modality != 'remote') ...[field(city, 'Cidade'), field(state, 'Estado (UF)', validator: (v) => RegExp(r'^[A-Za-z]{2}$').hasMatch(v?.trim() ?? '') ? null : 'Informe a sigla do estado.')],
     field(skills, 'Competências separadas por vírgula'),
     const Text('Sua vaga passará por moderação antes de entrar no feed público.'), const SizedBox(height: 20),

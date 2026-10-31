@@ -16,6 +16,7 @@ from app.config import settings
 from app.db import session
 from app.mailer import email_configured, process_email_outbox
 from app.models import EmailOutbox, EmailVerification, User
+from app.premium import has_premium_access
 from app.schemas import Login, Register, ResendVerification, VerifyEmail
 from app.security import DUMMY_HASH, cipher, current_user, hash_password, token, verify_password
 from app.verification_debug import log_verification_fallback
@@ -72,7 +73,7 @@ async def attempt_verification_delivery(user_id: uuid.UUID, code: str) -> str:
 
 def account_response(user: User) -> dict:
     return {'id': user.id, 'email': user.email, 'name': user.name, 'role': user.role,
-            'skills': user.skills, 'is_premium': user.is_premium,
+            'skills': user.skills, 'is_premium': has_premium_access(user),
             'automation_enabled': user.automation_enabled, 'has_resume': bool(user.resume_key),
             'preferences': user.preferences, 'email_verified': user.email_verified,
             'verification_required': not user.email_verified,

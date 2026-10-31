@@ -1,5 +1,6 @@
 """Authenticated read-only execution reports for the candidate who owns them."""
 import asyncio
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -9,13 +10,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.automation_models import AutomationEvent, AutomationRun
 from app.db import session
 from app.models import User
+from app.premium import has_premium_access
 from app.security import role
 
 router = APIRouter(prefix='/v1/automation', tags=['Automação Premium'])
 
 
 def premium(user: User):
-    if not user.is_premium:
+    if not has_premium_access(user):
         raise HTTPException(403, 'Esta funcionalidade exige uma assinatura Premium.')
 
 
@@ -27,7 +29,7 @@ def event_view(event):
 
 def run_view(run):
     return {key: getattr(run, key) for key in ['id', 'status', 'started_at', 'finished_at',
-        'scanned_jobs', 'eligible_jobs', 'submitted_applications', 'manual_review_jobs', 'error_count', 'omitted_events']}
+        'scanned_jobs', 'filtered_jobs', 'eligible_jobs', 'submitted_applications', 'manual_review_jobs', 'error_count', 'omitted_events']}
 
 
 @router.get('/runs')
@@ -54,7 +56,7 @@ async def report_events(run_id: UUID, offset: int = Query(0, ge=0), limit: int =
 
 
 @router.post('/run', status_code=202)
-async def enqueue_now(user: User = Depends(role('candidate'))):
+async def enqueue_now(user: User = Depends(role('candidate')), db: AsyncSession = Depends(session)):
     """Request an immediate cycle; server state is authoritative for Premium."""
     premium(user)
     if not user.automation_enabled:
@@ -62,11 +64,38 @@ async def enqueue_now(user: User = Depends(role('candidate'))):
     if not user.resume_key:
         raise HTTPException(409, 'Envie seu currículo PDF antes de iniciar os envios.')
     prefs = user.preferences or {}
-    if not prefs.get('titles') or not prefs.get('modalities'):
-        raise HTTPException(422, 'Configure os cargos e modalidades de interesse antes de iniciar.')
+    if not any(prefs.get(key) for key in ('modalities', 'titles', 'locations', 'contract_types', 'keywords', 'min_salary')):
+        raise HTTPException(409, 'Configure ao menos um critério de busca antes de iniciar.')
+    run = AutomationRun(candidate_id=user.id, status='queued', scanned_jobs=0, filtered_jobs=0,
+        eligible_jobs=0, submitted_applications=0, manual_review_jobs=0, error_count=0, omitted_events=0)
+    db.add(run)
+    await db.commit()
     try:
         from app.worker import run_automation
-        await asyncio.to_thread(run_automation.delay)
+        await asyncio.to_thread(run_automation.apply_async,
+            args=[str(user.id), True, str(run.id)], task_id=str(run.id))
     except Exception:
+        run.status = 'failed'
+        run.finished_at = datetime.now(timezone.utc)
+        run.error_count = 1
+        await db.commit()
         raise HTTPException(503, 'Não foi possível agendar a busca agora. O serviço tentará novamente no próximo ciclo.') from None
-    return {'status': 'queued', 'message': 'Busca agendada. Acompanhe os resultados em Relatórios.'}
+    return {'status': 'queued', 'run_id': str(run.id), 'message': 'Busca iniciada. O progresso aparece aqui.'}
+
+
+@router.get('/runs/{run_id}/status')
+async def run_status(run_id: UUID, user: User = Depends(role('candidate')), db: AsyncSession = Depends(session)):
+    premium(user)
+    run = await db.scalar(select(AutomationRun).where(AutomationRun.id == run_id,
+        AutomationRun.candidate_id == user.id))
+    if not run:
+        raise HTTPException(404, 'Relatório não encontrado.')
+    state, progress = run.status, {}
+    if run.status in ('queued', 'running'):
+        from app.worker import celery
+        def task_progress():
+            result = celery.AsyncResult(str(run.id))
+            return result.state, result.info if isinstance(result.info, dict) else {}
+        task_state, progress = await asyncio.to_thread(task_progress)
+        state = {'PENDING': 'queued', 'PROGRESS': 'running', 'SUCCESS': 'complete', 'FAILURE': 'failed'}.get(task_state, run.status)
+    return {**run_view(run), 'status': state, 'progress': progress}

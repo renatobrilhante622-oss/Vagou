@@ -44,6 +44,7 @@ class Job(Base):
     salary_min: Mapped[float] = mapped_column(Numeric(12, 2))
     salary_max: Mapped[float] = mapped_column(Numeric(12, 2))
     modality: Mapped[str] = mapped_column(String(16))
+    contract_type: Mapped[str | None] = mapped_column(String(16))
     location: Mapped[str] = mapped_column(String(160))
     keywords: Mapped[list] = mapped_column(JSON)
     active: Mapped[bool] = mapped_column(Boolean, default=True)

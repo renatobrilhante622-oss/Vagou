@@ -15,6 +15,7 @@ from app.courses import COURSES
 from app.db import session
 from app.matching import eligible, match, normalize
 from app.models import Application, Job, User
+from app.premium import has_premium_access
 from app.schemas import DeleteAccount, JobCreate, JobOut, PublicJobOut, Preferences, ProfileUpdate, StatusUpdate
 from app.security import cipher, current_user, role, verify_password
 from app.services import apply, private_storage
@@ -27,7 +28,7 @@ DB = Depends(session)
 
 def account_view(user):
     return {'id': user.id, 'email': user.email, 'name': user.name, 'role': user.role, 'skills': user.skills,
-            'is_premium': user.is_premium, 'automation_enabled': user.automation_enabled,
+            'is_premium': has_premium_access(user), 'automation_enabled': user.automation_enabled,
             'has_resume': bool(user.resume_key), 'preferences': user.preferences or {},
             'phone': cipher().decrypt(user.phone_encrypted.encode()).decode() if user.phone_encrypted else None,
             'email_verified': user.email_verified, 'company_cnpj': user.company_cnpj,
@@ -41,6 +42,13 @@ async def me(user: User = Depends(current_user)):
     return account_view(user)
 
 
+@router.get('/candidate/entitlements')
+async def candidate_entitlements(user: User = Candidate):
+    premium = has_premium_access(user)
+    return {'is_premium': premium, 'plan': 'premium' if premium else 'free',
+            'automation_enabled': user.automation_enabled}
+
+
 @router.put('/me/profile')
 async def profile(payload: ProfileUpdate, user: User = Candidate, db: AsyncSession = DB):
     user.name = payload.name
@@ -52,13 +60,15 @@ async def profile(payload: ProfileUpdate, user: User = Candidate, db: AsyncSessi
 
 @router.put('/me/preferences')
 async def preferences(payload: Preferences, user: User = Candidate, db: AsyncSession = DB):
-    if payload.automation_enabled and not user.is_premium:
+    submitted = payload.model_dump(exclude_unset=True)
+    automation_enabled = submitted.pop('automation_enabled', None)
+    if automation_enabled is True and not has_premium_access(user):
         raise HTTPException(403, 'Premium subscription required')
-    updated_preferences = payload.model_dump(exclude={'automation_enabled'})
-    if 'completed_course_ids' not in payload.model_fields_set:
-        updated_preferences['completed_course_ids'] = (user.preferences or {}).get('completed_course_ids', [])
+    updated_preferences = dict(user.preferences or {})
+    updated_preferences.update(submitted)
     user.preferences = updated_preferences
-    user.automation_enabled = payload.automation_enabled
+    if automation_enabled is not None:
+        user.automation_enabled = automation_enabled
     await db.commit()
     return {**user.preferences, 'automation_enabled': user.automation_enabled}
 

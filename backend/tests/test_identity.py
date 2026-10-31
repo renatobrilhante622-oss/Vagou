@@ -26,12 +26,16 @@ class IdentitySchemas(unittest.TestCase):
 
     def test_location_required_for_onsite_and_hybrid(self):
         from app.schemas import Preferences
-        from pydantic import ValidationError
         for modality in ['onsite', 'hybrid']:
-            with self.assertRaises(ValidationError):
-                Preferences(modalities=[modality])
+            self.assertEqual(Preferences(modalities=[modality]).locations, [])
             self.assertEqual(Preferences(modalities=[modality], locations=['Recife, PE']).locations, ['Recife, PE'])
         self.assertEqual(Preferences(modalities=['remote']).locations, [])
+
+    def test_partial_optional_preferences_are_valid(self):
+        from app.schemas import Preferences
+        self.assertEqual(Preferences(locations=['Recife / PE']).titles, [])
+        self.assertEqual(Preferences(min_salary=None, modalities=None, keywords=None).min_salary, 0)
+        self.assertEqual(Preferences(contract_types=['clt']).contract_types, ['clt'])
 
     def test_code_preserves_leading_zero_and_rejects_wrong_shape(self):
         from app.schemas import VerifyEmail

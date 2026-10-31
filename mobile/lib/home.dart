@@ -41,8 +41,8 @@ class _HomeScreenState extends State<HomeScreen> {
       RecruiterApplications(api: widget.api),
       CompanyProfile(user: widget.user),
     ] : <Widget>[
-      JobsView(api: widget.api), ReportsView(api: widget.api), CoursesView(api: widget.api),
-      CandidateProfile(api: widget.api, user: widget.user, onChanged: () { widget.onRefreshUser().catchError((Object error) { if (mounted) friendlyError(context, error); }); }),
+      JobsView(api: widget.api, onUserChanged: widget.onRefreshUser), ReportsView(api: widget.api), CoursesView(api: widget.api),
+      CandidateProfile(api: widget.api, user: widget.user, onChanged: widget.onRefreshUser),
     ];
     return Scaffold(
       appBar: AppBar(title: const BrandMark(size: 32), actions: [

@@ -1,6 +1,6 @@
 import unittest
 from types import SimpleNamespace
-from app.matching import eligible, match
+from app.matching import eligible, filter_reason, match
 
 
 class MatchingTests(unittest.TestCase):
@@ -18,14 +18,26 @@ class MatchingTests(unittest.TestCase):
         self.assertEqual(match(['java'], ['javascript'])['match_score'], 0)
 
     def test_filters_and_remote_location(self):
-        job = SimpleNamespace(title='Desenvolvedor Python', salary_max=6000, modality='remote', location='São Paulo')
+        job = SimpleNamespace(title='Desenvolvedor Python', description='Vaga com contrato CLT', keywords=['python'], contract_type='clt', salary_max=6000, modality='remote', location='São Paulo')
         preferences = {'min_salary': 5000, 'titles': ['python'], 'modalities': ['remote'], 'locations': ['Recife']}
         self.assertTrue(eligible(job, preferences))
         self.assertFalse(eligible(job, {**preferences, 'min_salary': 7000}))
+        self.assertTrue(eligible(job, {**preferences, 'contract_types': ['clt'], 'keywords': ['contrato']}))
+        self.assertFalse(eligible(job, {**preferences, 'contract_types': ['pj']}))
+        self.assertFalse(eligible(job, {**preferences, 'keywords': ['cobol']}))
         job.modality = 'onsite'
         self.assertFalse(eligible(job, {**preferences, 'modalities': ['onsite']}))
-        job.location = 'RECIFE'
-        self.assertTrue(eligible(job, {**preferences, 'modalities': ['onsite']}))
+        job.location = 'Belém, PA'
+        self.assertFalse(eligible(job, {**preferences, 'modalities': ['onsite']}))
+        job.location = 'RECIFE / PE'
+        self.assertTrue(eligible(job, {**preferences, 'locations': ['Recife, PE'], 'modalities': ['onsite']}))
+        self.assertTrue(eligible(job, {**preferences, 'locations': ['Recife'], 'modalities': ['onsite']}))
+
+    def test_filter_reason_explains_rejection(self):
+        job = SimpleNamespace(title='Analista de dados', description='SQL e Python', keywords=['python'],
+            contract_type='clt', salary_max=4000, modality='onsite', location='Recife / PE')
+        self.assertEqual(filter_reason(job, {'min_salary': 5000}), 'Salário abaixo do piso definido.')
+        self.assertEqual(filter_reason(job, {'keywords': ['Java']}), 'Palavras-chave não encontradas.')
 
 
 if __name__ == '__main__':

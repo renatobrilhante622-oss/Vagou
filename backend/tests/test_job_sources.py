@@ -22,6 +22,11 @@ class JobSourcesTests(unittest.TestCase):
         self.assertNotIn('<p>', result[0].description)
         self.assertEqual(result[0].salary_max, 0)
         self.assertEqual(result[0].modality, 'remote')
+        self.assertIsNone(result[0].contract_type)
+
+    def test_supported_contract_type_is_retained(self):
+        job = parse_feed({'jobs': [self.fixture(contract_type='clt')]})[0]
+        self.assertEqual(job.contract_type, 'clt')
 
     def test_source_is_exact_allowlist_https_and_no_local_address(self):
         self.assertEqual(approved_source('https://jobs.example.com/api', ['jobs.example.com']), 'https://jobs.example.com/api')

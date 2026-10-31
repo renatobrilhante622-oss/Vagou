@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     smtp_security: Literal['starttls', 'ssl'] = 'starttls'
     smtp_timeout_seconds: int = Field(default=15, ge=1, le=60)
     moderator_emails: list[str] = []
+    premium_test_emails: str = Field(default='rbrilhante001@gmail.com', validation_alias=AliasChoices('PREMIUM_TEST_EMAILS', 'premium_test_emails'))
     job_source_auto_approve: bool = False
     job_source_urls: list[str] = []
     job_source_allowed_hosts: list[str] = []

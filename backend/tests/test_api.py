@@ -89,13 +89,15 @@ class ApiContract(unittest.TestCase):
                     headers[role] = {'Authorization': 'Bearer ' + response.json()['access_token']}
 
                 candidate, recruiter = headers['candidate'], headers['recruiter']
+                self.assertEqual(client.get('/v1/candidate/entitlements', headers=candidate).json()['plan'], 'free')
                 payload = {'title': 'Python Engineer', 'company': 'Integration',
                     'description': 'Desenvolvimento de APIs Python com PostgreSQL e testes.',
                     'salary_min': 5000, 'salary_max': 8000, 'modality': 'remote',
-                    'location': 'Brasil', 'keywords': ['python', 'sql']}
+                    'contract_type': 'clt', 'location': 'Brasil', 'keywords': ['python', 'sql']}
                 self.assertEqual(client.post('/v1/jobs', headers=candidate, json=payload).status_code, 403)
                 response = client.post('/v1/jobs', headers=recruiter, json=payload)
                 self.assertEqual(response.status_code, 201, response.text)
+                self.assertEqual(response.json()['contract_type'], 'clt')
                 job = response.json()['id']
                 self.assertEqual(response.json()['moderation_status'], 'pending')
                 self.assertEqual(client.get(f'/v1/jobs/{job}').status_code, 404)
@@ -124,9 +126,11 @@ class ApiContract(unittest.TestCase):
                 self.assertIn('bradesco-python', client.get('/v1/me', headers=candidate).json()['preferences']['completed_course_ids'])
                 self.assertEqual(client.post('/v1/me/courses/not-a-course', headers=candidate).status_code, 404)
                 preference_update = client.put('/v1/me/preferences', headers=candidate,
-                    json={'titles': ['Python Engineer'], 'modalities': ['remote'], 'min_salary': 5000})
+                    json={'locations': ['Recife / PE']})
                 self.assertEqual(preference_update.status_code, 200, preference_update.text)
                 self.assertIn('bradesco-python', preference_update.json()['completed_course_ids'])
+                self.assertEqual(preference_update.json()['titles'], ['Python Engineer'])
+                self.assertEqual(preference_update.json()['min_salary'], 4500)
                 self.assertEqual(client.post(f'/v1/jobs/{job}/applications', headers=candidate).status_code, 409)
                 pdf = io.BytesIO()
                 writer = PdfWriter()

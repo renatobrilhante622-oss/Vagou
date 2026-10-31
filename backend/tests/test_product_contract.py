@@ -1,6 +1,8 @@
 """Local regression coverage for professional catalog and input normalization."""
 import importlib.util
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 READY = bool(importlib.util.find_spec('email_validator') and importlib.util.find_spec('sqlalchemy'))
 
@@ -33,3 +35,13 @@ class ProductContracts(unittest.TestCase):
         self.assertEqual(Preferences(completed_course_ids=['cisco', 'cisco']).completed_course_ids, ['cisco'])
         with self.assertRaises(ValidationError):
             Preferences(completed_course_ids=['unverified-unknown-id'])
+
+    def test_test_premium_allowlist_is_case_insensitive_in_any_environment(self):
+        from app.premium import has_premium_access
+        user = SimpleNamespace(email='RBrilhante001@gmail.com', is_premium=False)
+        with patch('app.premium.settings', return_value=SimpleNamespace(
+                premium_test_emails='another@example.com; rbrilhante001@gmail.com')):
+            self.assertTrue(has_premium_access(user))
+        with patch('app.premium.settings', return_value=SimpleNamespace(
+                premium_test_emails='["rbrilhante001@gmail.com"]')):
+            self.assertTrue(has_premium_access(user))

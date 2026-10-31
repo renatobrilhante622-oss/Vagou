@@ -86,6 +86,7 @@ class ExternalJob:
     keywords: list[str]
     salary_min: float
     salary_max: float
+    contract_type: str | None
     source_url: str
 
     def values(self):
@@ -117,10 +118,13 @@ def parse_feed(data: dict, max_jobs: int = 200) -> list[ExternalJob]:
             minimum, maximum = amount(record.get('salary_min')), amount(record.get('salary_max'))
             if maximum < minimum:
                 continue
+            contract_type = record.get('contract_type')
+            if contract_type not in ('clt', 'pj', 'internship', 'temporary', 'apprentice', 'other'):
+                contract_type = None
             identity = str(record.get('id') or hashlib.sha256(url.encode()).hexdigest())[:255]
             jobs.append(ExternalJob(identity, title, company, description,
                 plain(record.get('location') or record.get('candidate_required_location') or 'Não informada', 160),
-                modality, keywords, minimum, maximum, url))
+                modality, keywords, minimum, maximum, contract_type, url))
         except (FeedError, ValueError, TypeError):
             continue
     return jobs

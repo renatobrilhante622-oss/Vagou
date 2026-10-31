@@ -16,12 +16,13 @@ class AutomationRun(Base):
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     scanned_jobs: Mapped[int] = mapped_column(Integer, default=0)
+    filtered_jobs: Mapped[int] = mapped_column(Integer, default=0)
     eligible_jobs: Mapped[int] = mapped_column(Integer, default=0)
     submitted_applications: Mapped[int] = mapped_column(Integer, default=0)
     manual_review_jobs: Mapped[int] = mapped_column(Integer, default=0)
     error_count: Mapped[int] = mapped_column(Integer, default=0)
     omitted_events: Mapped[int] = mapped_column(Integer, default=0)
-    __table_args__ = (CheckConstraint("status IN ('running','complete','failed')", name='ck_automation_run_status'),)
+    __table_args__ = (CheckConstraint("status IN ('queued','running','complete','failed','cancelled')", name='ck_automation_run_status'),)
 
 
 class AutomationEvent(Base):
@@ -35,4 +36,4 @@ class AutomationEvent(Base):
     status: Mapped[str] = mapped_column(String(24))
     detail: Mapped[str] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    __table_args__ = (CheckConstraint("status IN ('submitted','already_applied','requires_manual','missing_resume','failed')", name='ck_automation_event_status'),)
+    __table_args__ = (CheckConstraint("status IN ('submitted','already_applied','requires_manual','missing_resume','filtered','failed')", name='ck_automation_event_status'),)

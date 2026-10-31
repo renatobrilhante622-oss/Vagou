@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'api.dart';
+import 'automation_panel.dart';
+import 'preferences.dart';
 import 'ui.dart';
 
 class JobsView extends StatefulWidget {
   final Api api;
-  const JobsView({super.key, required this.api});
+  final Future<void> Function() onUserChanged;
+  const JobsView({super.key, required this.api, required this.onUserChanged});
   @override
   State<JobsView> createState() => _JobsViewState();
 }
@@ -14,9 +17,33 @@ class _JobsViewState extends State<JobsView> {
   bool loading = true, loadingMore = false;
   String category = 'high';
   Object? error;
+  Map<String, dynamic> user = {}, preferences = {};
   final Set<String> pending = {}, applied = {};
   @override
-  void initState() { super.initState(); load(); }
+  void initState() { super.initState(); load(); _loadAccount(); }
+
+  Future<void> _loadAccount() async {
+    try {
+      final result = Map<String, dynamic>.from(await widget.api.request('GET', '/me') as Map);
+      if (mounted) setState(() { user = result; preferences = Map<String, dynamic>.from(result['preferences'] as Map? ?? const {}); });
+    } catch (_) { }
+  }
+
+  Future<void> _editPreferences() async {
+    if (user.isEmpty) await _loadAccount();
+    if (!mounted) return;
+    await showPreferencesSheet(context, api: widget.api, preferences: preferences, onSaved: () async {
+      await _loadAccount();
+      await load();
+      await widget.onUserChanged();
+    });
+  }
+
+  Future<void> _refreshAfterAutomation() async {
+    await _loadAccount();
+    await load();
+    await widget.onUserChanged();
+  }
   Future<void> load({bool more = false}) async {
     setState(() { if (more) { loadingMore = true; } else { loading = true; } error = null; });
     try {
@@ -73,6 +100,11 @@ class _JobsViewState extends State<JobsView> {
     if (error != null && items.isEmpty) return EmptyState(icon: Icons.cloud_off_outlined, title: 'As oportunidades estão chegando', message: error is ApiException ? (error as ApiException).message : 'Não conseguimos carregar suas vagas.', onRetry: load);
     final visible = items.where((e) => category == 'high' ? e['category'] == 'high' : e['category'] == 'observation').toList();
     return RefreshIndicator(onRefresh: load, child: ListView(padding: const EdgeInsets.all(20), physics: const AlwaysScrollableScrollPhysics(), children: [
+      Wrap(spacing: 10, runSpacing: 8, children: [
+        OutlinedButton.icon(onPressed: _editPreferences, icon: const Icon(Icons.tune), label: const Text('Filtros e Preferências')),
+        FilledButton.icon(onPressed: () => showAutomationPanel(context, api: widget.api, onChanged: _refreshAfterAutomation), icon: const Icon(Icons.bolt), label: const Text('Automação Premium ⚡')),
+      ]),
+      const SizedBox(height: 12),
       const SectionTitle(title: 'Seu próximo capítulo', subtitle: 'Oportunidades alinhadas às competências e aos critérios do seu perfil.'),
       SegmentedButton<String>(segments: const [ButtonSegment(value: 'high', label: Text('Match alto'), icon: Icon(Icons.bolt)), ButtonSegment(value: 'observation', label: Text('Possíveis vagas'), icon: Icon(Icons.travel_explore))], selected: {category}, onSelectionChanged: (v) => setState(() => category = v.first)),
       const SizedBox(height: 18),

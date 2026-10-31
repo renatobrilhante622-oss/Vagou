@@ -10,7 +10,7 @@ docker compose run --rm migrate
 docker compose up -d api worker beat
 ```
 
-A migração vai de `0001` a `0003`. A `0002` exige confirmação de e-mail também das contas antigas: no próximo login, solicitar novo código e confirmar. Vagas anteriores à migração permanecem aprovadas; toda vaga nova entra em moderação. Recrutadores antigos têm campos empresariais nulos preservados, sem criar CNPJ fictício. Novos cadastros empresariais exigem CNPJ válido, razão social, e-mail e telefone. A validação de CNPJ verifica formato/dígitos (inclusive alfanumérico), não consulta a situação cadastral na Receita Federal.
+A migração vai de `0001` a `0007`; as últimas versões adicionam contrato opcional às vagas e progresso/eventos de filtros da automação. A `0002` exige confirmação de e-mail também das contas antigas: no próximo login, solicitar novo código e confirmar. Vagas anteriores à migração permanecem aprovadas; toda vaga nova entra em moderação. Recrutadores antigos têm campos empresariais nulos preservados, sem criar CNPJ fictício. Novos cadastros empresariais exigem CNPJ válido, razão social, e-mail e telefone. A validação de CNPJ verifica formato/dígitos (inclusive alfanumérico), não consulta a situação cadastral na Receita Federal.
 
 A migração de downgrade para antes de `0002` elimina vagas externas que não cabem no esquema antigo. Não faça downgrade com dados de produção sem um plano de restauração.
 
@@ -72,12 +72,14 @@ O conector aceita envelope JSON `jobs` com campos `id`, `url`/`source_url`, `tit
 
 As fontes exigem HTTPS e allowlist administrativa, não seguem redirects e têm timeout/tamanho limitados. A rede deve continuar aplicando proteção de egress contra resolução de destinos privados; não conceder edição dessa allowlist a candidatos.
 
+`PREMIUM_TEST_EMAILS` é uma lista separada por vírgula ou ponto e vírgula. A configuração padrão inclui `rbrilhante001@gmail.com`; qualquer conta listada recebe acesso Premium independente de `APP_ENV`, inclusive em produção. Configure essa allowlist somente com contas de teste autorizadas e remova acessos que não devam permanecer ativos. A API mostra o entitlement em `GET /v1/candidate/entitlements`; a execução imediata usa `POST /v1/automation/run`, que retorna `run_id`, acompanhado por `GET /v1/automation/runs/{run_id}/status`.
+
 O beat verifica fontes a cada 15 minutos e candidaturas elegíveis a cada minuto, mas cada candidato tem intervalo próprio entre 15 minutos e um dia (padrão uma hora). São necessários conta confirmada, Premium, currículo e autorização explícita. O teto real é o menor entre a preferência do candidato e `AUTOMATION_MAX_APPLICATIONS_PER_RUN` (padrão 20).
 
 - **Vaga interna aprovada:** a candidatura é entregue ao recrutador dentro do Vagou!, com unicidade por candidato/vaga e registro `submitted`.
 - **Vaga externa:** o canal oficial precisa ser aberto pelo candidato. O evento é `requires_manual`; não se conta um link aberto como envio. A implementação não envia formulários a LinkedIn, Gupy ou outros portais sem APIs e permissões desses provedores.
 
-`GET /v1/automation/runs` entrega resumos privados paginados; `/runs/{id}/events` entrega eventos paginados, status, data e link. Cada ciclo armazena até 200 eventos detalhados e informa `omitted_events`; os totais contam todos os resultados examinados. Defina rotina operacional de retenção/expurgo de relatórios conforme a política de privacidade e volume real. Remoção de conta elimina seus relatórios em cascata.
+`GET /v1/automation/runs` entrega resumos privados paginados; `/runs/{id}/status` informa estado e progresso; `/runs/{id}/events` entrega eventos paginados, status, data e link. Cada ciclo armazena até 200 eventos detalhados e informa `omitted_events`; os totais contam todos os resultados examinados, inclusive vagas descartadas pelos filtros. Defina rotina operacional de retenção/expurgo de relatórios conforme a política de privacidade e volume real. Remoção de conta elimina seus relatórios em cascata.
 
 ## Android e download do APK
 

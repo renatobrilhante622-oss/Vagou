@@ -17,7 +17,8 @@ class ApiException implements Exception {
 class Api {
   static const base = String.fromEnvironment('API_BASE_URL', defaultValue: 'https://nest-gents-sudden.ngrok-free.dev');
   final storage = const FlutterSecureStorage();
-  final client = http.Client();
+  Api({http.Client? client}) : client = client ?? http.Client();
+  final http.Client client;
   String? _token;
   void Function()? onUnauthorized;
 
@@ -91,14 +92,14 @@ class Api {
         if (field.contains('email')) return 'Informe um endereço de e-mail válido.';
         if (field == 'company_cnpj') return 'Informe um CNPJ válido com 14 caracteres e dígitos verificadores corretos.';
         if (field == 'min_salary') return 'Confira a pretensão salarial informada.';
-        if (field == 'locations') return 'Informe sua cidade e UF para vagas presenciais ou híbridas.';
+        if (field == 'locations') return 'Confira a cidade e a UF informadas para filtrar vagas presenciais ou híbridas.';
         if (field == 'modalities') return 'Escolha ao menos uma modalidade de trabalho.';
         if (field == 'code') return 'Digite os 6 números enviados para o seu e-mail.';
         if (field.contains('phone')) return 'Informe o telefone com +55, DDD e número.';
         if (field == 'name') return 'Informe seu nome completo.';
         if (field == 'company_name') return 'Informe a razão social da empresa.';
       }
-      return 'Confira os campos preenchidos e tente novamente.';
+      return 'Confira os campos informados e tente novamente.';
     }
     final code = detail is Map ? detail['code'] : null;
     if (code == 'email_verification_required') return 'Confirme seu e-mail com o código de 6 dígitos antes de entrar.';
@@ -118,7 +119,7 @@ class Api {
       case 409: return 'Já existe um cadastro com esses dados, ou a operação já foi realizada.';
       case 413: return 'O arquivo é muito grande. Escolha um PDF de até 5 MB.';
       case 415: return 'Escolha um currículo no formato PDF.';
-      case 422: return 'Confira os dados informados e tente novamente.';
+      case 422: return 'Confira os campos informados e tente novamente.';
       case 429: return 'Você fez várias tentativas. Aguarde um minuto e tente novamente.';
       default: return 'Não foi possível concluir agora. Tente novamente em instantes.';
     }
