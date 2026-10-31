@@ -63,7 +63,13 @@ async def automate(candidate_id=None, force=False, run_id=None, progress=None):
     collected_jobs = 0
     try:
         if force:
-            collection = await refresh_job_sources()
+            search_preferences = {}
+            if candidate_id:
+                async with sessions() as db:
+                    candidate = await db.get(User, candidate_id)
+                    if candidate:
+                        search_preferences = candidate.preferences or {}
+            collection = await refresh_job_sources(search_preferences)
             collected_jobs = collection['collected_jobs']
         allowed_test_emails = premium_test_emails()
         cursor = None
@@ -201,22 +207,24 @@ async def automate(candidate_id=None, force=False, run_id=None, progress=None):
         await engine.dispose()
 
 
-async def refresh_job_sources():
+async def refresh_job_sources(preferences: dict | None = None):
     cfg = settings()
-    if not cfg.job_source_urls:
+    has_gupy_query = bool(preferences and (preferences.get('titles') or preferences.get('keywords')))
+    if not cfg.job_source_urls and not has_gupy_query:
         return {'imported': 0, 'collected_jobs': 0, 'failed_sources': 0, 'configured': False}
     engine = create_async_engine(cfg.database_url, pool_pre_ping=True)
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     imported = collected = 0
     try:
         sources, failed = await collect_authorized_sources(cfg.job_source_urls,
-            cfg.job_source_allowed_hosts, cfg.job_source_max_bytes, cfg.job_source_max_jobs)
+            cfg.job_source_allowed_hosts, cfg.job_source_max_bytes, cfg.job_source_max_jobs,
+            preferences=preferences)
         for source in sources:
             collected += len(source.jobs)
             async with sessions.begin() as db:
                 for job in source.jobs:
                     values = {**job.values(), 'source_name': source.name, 'recruiter_id': None,
-                        'active': True, 'moderation_status': 'approved' if cfg.job_source_auto_approve else 'pending'}
+                        'active': True, 'moderation_status': 'approved' if source.auto_approve or cfg.job_source_auto_approve else 'pending'}
                     statement = insert(Job).values(**values)
                     updates = {key: getattr(statement.excluded, key) for key in (
                         'title', 'company', 'description', 'location', 'modality', 'contract_type',

@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import httpx
 
-from app.job_sources import FeedError, approved_source, fetch_feed, parse_feed, public_https_url
+from app.job_sources import FeedError, approved_source, fetch_feed, parse_feed, parse_job_postings, parse_rss, public_https_url
 
 
 class JobSourcesTests(unittest.TestCase):
@@ -28,6 +28,21 @@ class JobSourcesTests(unittest.TestCase):
         job = parse_feed({'jobs': [self.fixture(contract_type='clt')]})[0]
         self.assertEqual(job.contract_type, 'clt')
 
+        def test_public_rss_and_schema_jobposting_parsing(self):
+                rss = b'''<rss><channel><item><guid>rss-1</guid><title>Python Engineer</title>
+                    <company>Example Ltda</company><description>Build Python services for a distributed engineering team.</description>
+                    <link>https://jobs.example.com/rss-1</link><location>Brasilia DF remote</location><category>python</category>
+                </item></channel></rss>'''
+                rss_job = parse_rss(rss)[0]
+                self.assertEqual((rss_job.source_external_id, rss_job.modality), ('rss-1', 'remote'))
+                html = '''<script type="application/ld+json">{"@type":"JobPosting","title":"Analista de Dados",
+                    "hiringOrganization":{"name":"Empresa Dados"},"description":"Analise dados e desenvolva relatórios para equipes de produto.",
+                    "url":"https://jobs.example.com/data-1","jobLocation":{"address":{"addressLocality":"Brasília","addressRegion":"DF"}},
+                    "employmentType":"FULL_TIME"}</script>'''
+                schema_job = parse_job_postings(html, 'https://jobs.example.com/list')[0]
+                self.assertEqual((schema_job.title, schema_job.company, schema_job.location),
+                        ('Analista de Dados', 'Empresa Dados', 'Brasília, DF'))
+
     def test_source_is_exact_allowlist_https_and_no_local_address(self):
         self.assertEqual(approved_source('https://jobs.example.com/api', ['jobs.example.com']), 'https://jobs.example.com/api')
         for url in ['http://jobs.example.com/api', 'https://jobs.example.com.attacker.net/api', 'https://user:pass@jobs.example.com/api', 'https://127.0.0.1/api', 'https://192.168.1.2/api', 'https://localhost/api', 'https://jobs.example.com:8000/api']:
@@ -36,8 +51,8 @@ class JobSourcesTests(unittest.TestCase):
 
     def test_bad_records_are_rejected_and_scan_is_bounded(self):
         records = [self.fixture(url='http://insecure.example.com'), self.fixture(salary_min=8000, salary_max=4000), self.fixture(tags=[]), self.fixture()]
-        self.assertEqual(len(parse_feed({'jobs': records})), 1)
-        self.assertEqual(len(parse_feed({'jobs': records}, max_jobs=3)), 0)
+        self.assertEqual(len(parse_feed({'jobs': records})), 2)
+        self.assertEqual(len(parse_feed({'jobs': records}, max_jobs=3)), 1)
         with self.assertRaises(FeedError):
             parse_feed({'not_jobs': []})
 

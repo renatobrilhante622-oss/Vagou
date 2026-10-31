@@ -32,14 +32,15 @@ def evaluate_job(job, skills: list[str], preferences: dict) -> dict:
     missed = []
 
     skill_match = match(skills, job.keywords or [])
-    components.append((0.35, skill_match['match_score']))
-    if skill_match['match_score'] == 100:
-        reasons.append('Competências compatíveis com os requisitos da vaga.')
-    elif skill_match['match_score']:
-        reasons.append(f"{skill_match['match_score']}% das competências da vaga coincidem.")
-        missed.append('Competências pendentes: ' + ', '.join(skill_match['missing_skills'][:5]))
-    else:
-        missed.append('Poucas competências coincidem com os requisitos da vaga.')
+    if job.keywords:
+        components.append((0.35, skill_match['match_score']))
+        if skill_match['match_score'] == 100:
+            reasons.append('Competências compatíveis com os requisitos da vaga.')
+        elif skill_match['match_score']:
+            reasons.append(f"{skill_match['match_score']}% das competências da vaga coincidem.")
+            missed.append('Competências pendentes: ' + ', '.join(skill_match['missing_skills'][:5]))
+        else:
+            missed.append('Poucas competências coincidem com os requisitos da vaga.')
 
     titles = preferences.get('titles') or []
     if titles:
