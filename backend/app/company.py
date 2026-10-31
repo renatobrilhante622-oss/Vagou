@@ -2,8 +2,13 @@
 import re
 
 
+def normalize_cnpj(value: str) -> str:
+    return re.sub(r'[.\s/\-]', '', value).upper()
+
+
 def valid_cnpj(value: str) -> bool:
     """Receita Federal checksum, including alphanumeric CNPJs issued from 2026."""
+    value = normalize_cnpj(value)
     if not re.fullmatch(r'[A-Z0-9]{12}[0-9]{2}', value) or len(set(value)) == 1:
         return False
     numbers = [ord(character) - 48 for character in value]

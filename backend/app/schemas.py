@@ -5,7 +5,7 @@ import re
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints, field_validator, model_validator
 
-from app.company import valid_cnpj
+from app.company import valid_cnpj, normalize_cnpj
 
 
 Password = Annotated[str, StringConstraints(strip_whitespace=False)]
@@ -50,7 +50,7 @@ class Register(StrictModel):
     def cnpj_valid(cls, value):
         if value is None:
             return value
-        normalized = re.sub(r'[^A-Za-z0-9]', '', value).upper()
+        normalized = normalize_cnpj(value)
         if not valid_cnpj(normalized):
             raise ValueError('Informe um CNPJ válido, com dígitos verificadores corretos.')
         return normalized

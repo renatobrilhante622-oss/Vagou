@@ -103,6 +103,7 @@ class Api {
     final code = detail is Map ? detail['code'] : null;
     if (code == 'email_verification_required') return 'Confirme seu e-mail com o código de 6 dígitos antes de entrar.';
     final text = detail is String ? detail.toLowerCase() : '';
+    if (status == 409) return 'Já existe um cadastro com este e-mail ou CNPJ. Entre na sua conta ou solicite um novo código.';
     if (text.contains('cnpj')) return 'O CNPJ informado não é válido. Confira os dados da empresa.';
     if (text.contains('premium')) return 'Esta funcionalidade está disponível para assinantes Premium.';
     if (text.contains('resume') || text.contains('currículo')) return 'Envie seu currículo PDF no perfil antes de se candidatar.';

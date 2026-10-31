@@ -30,6 +30,8 @@ A migração de downgrade para antes de `0002` elimina vagas externas que não c
 | `SMTP_FROM` | O mesmo endereço autorizado como remetente |
 | `SMTP_TIMEOUT_SECONDS` | `15` |
 
+`SMTP_USER` é aceito como alternativa a `SMTP_USERNAME`; se `SMTP_FROM` estiver vazio, será usado o usuário autenticado. Espaços de agrupamento na senha de app Gmail são removidos. Após alterações, recrie API/worker/beat para recarregar a configuração.
+
 Não cole senhas no chat, GitHub, logs ou arquivos versionados. A senha de app é usada pelo processo SMTP; não é um token de proxy HTTP. A rede do servidor precisa permitir SMTP com TLS para `smtp.gmail.com:587`. Não há alteração automática de firewall ou rede nesta implementação. A conta Gmail está sujeita às cotas/restrições do provedor; a equipe deve acompanhar falhas de entrega. Se a conta não disponibilizar senhas de app, será necessário outro serviço SMTP compatível autenticado e com TLS.
 
 Recrie API, worker e beat após alterar as variáveis para aplicar a configuração. O Compose já carrega `backend/.env` nesses serviços; não é preciso editar sua estrutura.

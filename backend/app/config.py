@@ -3,12 +3,12 @@ from pathlib import Path
 from typing import Literal
 
 from cryptography.fernet import Fernet
-from pydantic import Field, SecretStr, model_validator
+from pydantic import AliasChoices, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file='.env', extra='ignore')
+    model_config = SettingsConfigDict(env_file='.env', extra='ignore', env_ignore_empty=True)
     database_url: str = 'postgresql+asyncpg://vagou:vagou@localhost:5432/vagou'
     jwt_secret: SecretStr
     data_key: SecretStr
@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     privacy_version: str = '2026-01'
     smtp_host: str = ''
     smtp_port: int = Field(default=587, ge=1, le=65535)
-    smtp_username: str = ''
+    smtp_username: str = Field(default='', validation_alias=AliasChoices('SMTP_USERNAME', 'SMTP_USER', 'smtp_username'))
     smtp_password: SecretStr | None = None
     smtp_from: str = ''
     smtp_security: Literal['starttls', 'ssl'] = 'starttls'
@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     def validate_keys(self):
         if len(self.jwt_secret.get_secret_value().encode()) < 32:
             raise ValueError('JWT_SECRET must contain at least 32 bytes')
+        self.smtp_host = self.smtp_host.strip()
+        self.smtp_username = self.smtp_username.strip()
+        self.smtp_from = self.smtp_from.strip() or self.smtp_username
+        if self.smtp_host.casefold() == 'smtp.gmail.com' and self.smtp_password:
+            self.smtp_password = SecretStr(''.join(self.smtp_password.get_secret_value().split()))
         Fernet(self.data_key.get_secret_value().encode())
         return self
 

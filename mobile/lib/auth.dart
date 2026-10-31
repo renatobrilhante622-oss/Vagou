@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'api.dart';
 import 'ui.dart';
+import 'company.dart';
 
 class AuthScreen extends StatefulWidget {
   final Api api;
@@ -35,7 +36,7 @@ class _AuthScreenState extends State<AuthScreen> {
       if (register) {
         final registration = await widget.api.request('POST', '/auth/register', {
           'email': email.text.trim(), 'password': password.text, 'name': name.text.trim(), 'role': role, 'privacy_version': '2026-01', 'consent': true,
-          if (role == 'recruiter') ...{'company_cnpj': cnpj.text.trim(), 'company_name': company.text.trim(), 'company_contact_email': contact.text.trim(), 'company_phone': phone.text.trim()},
+          if (role == 'recruiter') ...{'company_cnpj': normalizeCnpj(cnpj.text), 'company_name': company.text.trim(), 'company_contact_email': contact.text.trim(), 'company_phone': phone.text.trim()},
         });
         if (!mounted) return;
         if (registration['delivery_status'] == 'retrying') {
@@ -80,7 +81,7 @@ class _AuthScreenState extends State<AuthScreen> {
     field(password, 'Senha', Icons.lock_outline_rounded, secret: true, validator: (v) => v == null || v.isEmpty ? 'Informe sua senha.' : register && v.length < 12 ? 'Use no mínimo 12 caracteres.' : null),
     if (register && role == 'recruiter') ...[
       const SectionTitle(title: 'Sua empresa', subtitle: 'Esses dados ajudam a criar um ambiente de confiança.'),
-      field(cnpj, 'CNPJ', Icons.badge_outlined, validator: (v) => (v ?? '').replaceAll(RegExp(r'[^a-zA-Z0-9]'), '').length != 14 ? 'Informe um CNPJ com 14 caracteres.' : null),
+      field(cnpj, 'CNPJ', Icons.badge_outlined, validator: (v) => validCnpj(v ?? '') ? null : 'Confira os 14 caracteres e os dígitos verificadores do CNPJ.'),
       field(company, 'Razão social', Icons.business_outlined),
       field(contact, 'E-mail corporativo', Icons.alternate_email, type: TextInputType.emailAddress, validator: emailValidator),
       field(phone, 'Contato corporativo (+55 e DDD)', Icons.phone_outlined, type: TextInputType.phone, validator: (v) => RegExp(r'^\+55\d{10,11}$').hasMatch(v ?? '') ? null : 'Use +55 seguido de DDD e número.'),
