@@ -71,7 +71,7 @@ async def automate(candidate_id=None, force=False, run_id=None, progress=None):
                     query = query.where(User.id > cursor)
                 ids = list((await db.scalars(query)).all())
                 if not ids:
-                break
+                    break
             for user_id in ids:
                 try:
                     async with sessions.begin() as db:
