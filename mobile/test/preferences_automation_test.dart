@@ -12,11 +12,21 @@ import 'package:vagou/ui.dart';
 http.Response jsonResponse(Object body) => http.Response(jsonEncode(body), 200,
     headers: {'content-type': 'application/json'});
 
+void useMobileViewport(WidgetTester tester) {
+  tester.view.physicalSize = const Size(430, 932);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+}
+
 void main() {
   testWidgets('profile keeps preferences out and refreshes access independently', (tester) async {
+    useMobileViewport(tester);
     final requests = <http.Request>[];
     final api = Api(client: MockClient((request) async {
       requests.add(request);
+      expect(request.method, 'GET');
+      expect(request.url.path, '/v1/candidate/entitlements');
       return jsonResponse({'is_premium': true, 'plan': 'premium', 'automation_enabled': false});
     }));
     addTearDown(api.client.close);
@@ -29,6 +39,7 @@ void main() {
     expect(find.text('Filtros e Preferências'), findsNothing);
     expect(find.text('Meu Plano'), findsOneWidget);
     await tester.ensureVisible(find.text('Atualizar meu acesso'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Atualizar meu acesso'));
     await tester.pumpAndSettle();
     expect(requests.single.method, 'GET');
@@ -38,13 +49,14 @@ void main() {
   });
 
   testWidgets('city and state-only preference save succeeds with optional filters empty', (tester) async {
+    useMobileViewport(tester);
     Map<String, dynamic>? saved;
     final api = Api(client: MockClient((request) async {
       if (request.method == 'PUT' && request.url.path == '/v1/me/preferences') {
         saved = jsonDecode(request.body) as Map<String, dynamic>;
         return jsonResponse(saved!);
       }
-      return jsonResponse({});
+      throw StateError('Unexpected request: ${request.method} ${request.url}');
     }));
     addTearDown(api.client.close);
     await tester.pumpWidget(MaterialApp(theme: Brand.theme(Brightness.light), home: Builder(builder: (context) => Scaffold(
@@ -56,6 +68,7 @@ void main() {
     final city = find.byWidgetPredicate((widget) => widget is TextField && widget.decoration?.labelText == 'Cidade');
     await tester.enterText(city, 'Recife');
     await tester.ensureVisible(find.text('Salvar preferências'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Salvar preferências'));
     await tester.pumpAndSettle();
 
@@ -67,6 +80,7 @@ void main() {
   });
 
   testWidgets('automation panel displays run progress from the status endpoint', (tester) async {
+    useMobileViewport(tester);
     const runId = 'c0ffee00-0000-4000-8000-000000000001';
     final requests = <String>[];
     final api = Api(client: MockClient((request) async {
@@ -82,7 +96,7 @@ void main() {
           'eligible_jobs': 3, 'submitted_applications': 2, 'manual_review_jobs': 1, 'progress': {}});
       }
       if (request.url.path == '/v1/automation/runs/$runId/events') return jsonResponse({'items': []});
-      return jsonResponse({});
+      throw StateError('Unexpected request: ${request.method} ${request.url}');
     }));
     addTearDown(api.client.close);
     await tester.pumpWidget(MaterialApp(theme: Brand.theme(Brightness.light), home: Builder(builder: (context) => Scaffold(
@@ -91,6 +105,7 @@ void main() {
     await tester.tap(find.text('Abrir robô'));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('Iniciar Varredura e Envio Agora'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Iniciar Varredura e Envio Agora'));
     await tester.pumpAndSettle();
 

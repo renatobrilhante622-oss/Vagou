@@ -63,7 +63,7 @@ void main() {
   test('malformed curated errors fall back to a safe validation message', () async {
     final response = http.Response(jsonEncode({'errors': ['unexpected'], 'detail': 'SQLAlchemy stack trace'}), 422);
     await expectLater(api.decode(response, authenticated: false), throwsA(
-      isA<ApiException>().having((error) => error.message, 'message', 'Confira os dados informados e tente novamente.'),
+      isA<ApiException>().having((error) => error.message, 'message', 'Confira os campos informados e tente novamente.'),
     ));
   });
 }
