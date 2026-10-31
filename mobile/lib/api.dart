@@ -89,7 +89,10 @@ class Api {
         final type = entry['type']?.toString() ?? '';
         if (field == 'password' && type == 'string_too_short') return 'Sua senha precisa ter no mínimo 12 caracteres.';
         if (field.contains('email')) return 'Informe um endereço de e-mail válido.';
-        if (field == 'company_cnpj') return 'Confira o CNPJ informado e tente novamente.';
+        if (field == 'company_cnpj') return 'Informe um CNPJ válido com 14 caracteres e dígitos verificadores corretos.';
+        if (field == 'min_salary') return 'Confira a pretensão salarial informada.';
+        if (field == 'locations') return 'Informe sua cidade e UF para vagas presenciais ou híbridas.';
+        if (field == 'modalities') return 'Escolha ao menos uma modalidade de trabalho.';
         if (field == 'code') return 'Digite os 6 números enviados para o seu e-mail.';
         if (field.contains('phone')) return 'Informe o telefone com +55, DDD e número.';
         if (field == 'name') return 'Informe seu nome completo.';

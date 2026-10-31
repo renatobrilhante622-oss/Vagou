@@ -222,7 +222,7 @@ async def applications(offset: int = Query(0, ge=0), limit: int = Query(20, ge=1
     query = query.where(Application.candidate_id == user.id) if user.role == 'candidate' else query.where(Job.recruiter_id == user.id)
     rows = (await db.execute(query.order_by(Application.created_at.desc(), Application.id).offset(offset).limit(limit))).all()
     return [{'id': a.id, 'job_id': j.id, 'job_title': j.title, 'candidate_id': a.candidate_id,
-             'source': a.source, 'status': a.status, 'match_score': a.match_score, 'created_at': a.created_at,
+             'source': a.source, 'status': a.status, 'match_score': a.match_score, 'created_at': a.created_at, 'status_updated_at': a.status_updated_at,
              'company': j.company, 'job_url': j.source_url, 'job_path': f'/v1/jobs/{j.id}',
              'source_name': j.source_name, 'candidate_name': candidate_name} for a, j, candidate_name in rows]
 
@@ -241,8 +241,9 @@ async def application_status(application_id: uuid.UUID, payload: StatusUpdate, u
     if not application:
         raise HTTPException(404, 'Application not found')
     application.status = payload.status
+    application.status_updated_at = datetime.now(timezone.utc)
     await db.commit()
-    return {'id': application.id, 'status': application.status}
+    return {'id': application.id, 'status': application.status, 'status_updated_at': application.status_updated_at}
 
 
 @router.get('/recruiter/applicants')
@@ -252,37 +253,11 @@ async def recruiter_applicants(
     location: str | None = Query(None, max_length=120),
     salary_ceiling: float | None = Query(None, ge=0, le=1000000),
     completed_course_id: str | None = Query(None, max_length=100),
-    work_style: str | None = Query(None, pattern=r'^(remote|hybrid|onsite)
-async def dashboard(user: User = Candidate, db: AsyncSession = DB):
-    rows = (await db.execute(select(Application.source, Application.status, func.count(Application.id), func.sum(Application.match_score)).where(Application.candidate_id == user.id).group_by(Application.source, Application.status))).all()
-    total = sum(r[2] for r in rows)
-    by_status = {}
-    for _, status, count, _ in rows:
-        by_status[status] = by_status.get(status, 0) + count
-    observation = 0
-    # Stream bounded batches instead of retaining the entire job catalog.
-    result = await db.stream_scalars(select(Job).where(Job.active.is_(True), Job.moderation_status == 'approved').execution_options(yield_per=200))
-    async for job in result:
-        if eligible(job, user.preferences) and match(user.skills, job.keywords)['category'] == 'observation':
-            observation += 1
-    return {'total_applications': total, 'manual': sum(r[2] for r in rows if r[0] == 'manual'),
-            'automatic': sum(r[2] for r in rows if r[0] == 'automatic'), 'observation_jobs': observation,
-            'average_match_score': round(sum(r[3] for r in rows) / total, 2) if total else 0,
-            'by_status': by_status, 'generated_at': datetime.now(timezone.utc)}
-
-
-@router.get('/courses')
-async def courses(skill: str | None = Query(None, max_length=80)):
-    return [c for c in COURSES if skill is None or normalize(skill) in {normalize(x) for x in c['skills']}]
-),
+    work_style: str | None = Query(None, pattern=r'^(remote|hybrid|onsite)$'),
     offset: int = Query(0, ge=0), limit: int = Query(30, ge=1, le=100),
     user: User = Recruiter, db: AsyncSession = DB,
 ):
-    """Recruiter-only, auditable filters on applicants to this recruiter's vacancies.
-
-    Course completion is SELF-DECLARED, never a verified certificate. Work-style
-    fit uses only explicitly selected modalities, not inferred personal traits.
-    """
+    """Applicant filters for own jobs; no personal characteristics are inferred."""
     query = (select(Application, Job, User)
              .join(Job, Job.id == Application.job_id)
              .join(User, User.id == Application.candidate_id)
@@ -323,8 +298,24 @@ async def courses(skill: str | None = Query(None, max_length=80)):
     finally:
         await result.close()
     return {'items': items[:limit], 'next_offset': offset + limit if len(items) > limit else None,
-            'filters_applied': {'min_match': min_match, 'location': location, 'salary_ceiling': salary_ceiling,
+            'filters_applied': {'min_match': min_match, 'location': location,
+                                'salary_ceiling': salary_ceiling,
                                 'completed_course_id': completed_course_id, 'work_style': work_style}}
+
+
+@router.get('/notifications')
+async def candidate_notifications(limit: int = Query(20, ge=1, le=50),
+                                  user: User = Candidate, db: AsyncSession = DB):
+    """Read-only inbox of employer status changes, without push claims."""
+    query = (select(Application, Job)
+             .join(Job, Job.id == Application.job_id)
+             .where(Application.candidate_id == user.id, Application.status != 'submitted')
+             .order_by(Application.status_updated_at.desc(), Application.id)
+             .limit(limit))
+    rows = (await db.execute(query)).all()
+    return [{'application_id': application.id, 'job_title': job.title,
+             'status': application.status, 'updated_at': application.status_updated_at}
+            for application, job in rows]
 
 
 @router.get('/dashboard')

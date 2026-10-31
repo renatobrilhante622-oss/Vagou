@@ -111,8 +111,22 @@ class ApiContract(unittest.TestCase):
                 self.assertEqual(client.get(f'/v1/jobs/{job}').status_code, 200)
                 self.assertEqual(client.put('/v1/me/preferences', headers=candidate,
                     json={'automation_enabled': True}).status_code, 403)
-                self.assertEqual(client.put('/v1/me/profile', headers=candidate,
-                    json={'name': 'Candidato', 'skills': ['python', 'sql'], 'phone': '+5511999999999'}).status_code, 200)
+                profile = client.put('/v1/me/profile', headers=candidate,
+                    json={'name': 'Candidato', 'skills': ['python', 'sql'], 'phone': '(11) 99999-9999'})
+                self.assertEqual(profile.status_code, 200, profile.text)
+                self.assertEqual(profile.json()['phone'], '+5511999999999')
+                preference = client.put('/v1/me/preferences', headers=candidate,
+                    json={'titles': ['Python Engineer'], 'modalities': ['remote'], 'min_salary': 4500,
+                          'locations': []})
+                self.assertEqual(preference.status_code, 200, preference.text)
+                completion = client.post('/v1/me/courses/bradesco-python', headers=candidate)
+                self.assertEqual(completion.status_code, 200, completion.text)
+                self.assertIn('bradesco-python', client.get('/v1/me', headers=candidate).json()['preferences']['completed_course_ids'])
+                self.assertEqual(client.post('/v1/me/courses/not-a-course', headers=candidate).status_code, 404)
+                preference_update = client.put('/v1/me/preferences', headers=candidate,
+                    json={'titles': ['Python Engineer'], 'modalities': ['remote'], 'min_salary': 5000})
+                self.assertEqual(preference_update.status_code, 200, preference_update.text)
+                self.assertIn('bradesco-python', preference_update.json()['completed_course_ids'])
                 self.assertEqual(client.post(f'/v1/jobs/{job}/applications', headers=candidate).status_code, 409)
                 pdf = io.BytesIO()
                 writer = PdfWriter()
@@ -127,6 +141,13 @@ class ApiContract(unittest.TestCase):
                 self.assertEqual(response.status_code, 200, response.text)
                 application = response.json()['id']
                 self.assertTrue(response.json()['created'])
+                applicant_search = client.get('/v1/recruiter/applicants?min_match=75&completed_course_id=bradesco-python&salary_ceiling=6000', headers=recruiter)
+                self.assertEqual(applicant_search.status_code, 200, applicant_search.text)
+                self.assertEqual(len(applicant_search.json()['items']), 1)
+                self.assertEqual(applicant_search.json()['items'][0]['course_evidence'], 'self_declared')
+                self.assertEqual(client.get('/v1/recruiter/applicants?completed_course_id=cisco', headers=recruiter).json()['items'], [])
+                self.assertEqual(client.get('/v1/recruiter/applicants', headers=candidate).status_code, 403)
+                self.assertEqual(client.post('/v1/automation/run', headers=candidate).status_code, 403)
                 duplicate = client.post(f'/v1/jobs/{job}/applications', headers=candidate)
                 self.assertFalse(duplicate.json()['created'])
                 self.assertEqual(client.get(f'/v1/applications/{application}/resume', headers=recruiter).content, pdf.getvalue())
@@ -134,6 +155,13 @@ class ApiContract(unittest.TestCase):
                     json={'status': 'hired'}).status_code, 403)
                 self.assertEqual(client.patch(f'/v1/applications/{application}', headers=recruiter,
                     json={'status': 'interview'}).status_code, 200)
+                notices = client.get('/v1/notifications', headers=candidate)
+                self.assertEqual(notices.status_code, 200, notices.text)
+                self.assertEqual(notices.json()[0]['status'], 'interview')
+                self.assertEqual(client.get('/v1/notifications', headers=recruiter).status_code, 403)
+                moderation = client.get('/v1/recruiter/moderation-summary', headers=recruiter)
+                self.assertEqual(moderation.status_code, 200, moderation.text)
+                self.assertGreaterEqual(moderation.json()['counts']['approved'], 1)
                 report = client.get('/v1/dashboard', headers=candidate).json()
                 self.assertEqual(report['total_applications'], 1)
                 self.assertEqual(report['manual'], 1)

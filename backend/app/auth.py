@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db import session
-from app.mailer import email_configured
+from app.mailer import email_configured, process_email_outbox
 from app.models import EmailOutbox, EmailVerification, User
 from app.schemas import Login, Register, ResendVerification, VerifyEmail
 from app.security import DUMMY_HASH, cipher, current_user, hash_password, token, verify_password
@@ -75,9 +75,22 @@ async def register(payload: Register, db: AsyncSession = Depends(session)):
         await db.rollback()
         raise HTTPException(409, 'Já existe cadastro com este e-mail ou CNPJ. Entre na sua conta ou solicite um novo código.') from None
     configured = email_configured()
-    message = ('Cadastro criado. O código de seis dígitos será encaminhado ao seu e-mail.' if configured
-               else 'Cadastro salvo. O envio do código aguarda a configuração do serviço de e-mail pela equipe Vagou!.')
-    return {**account_response(user), 'delivery_status': 'pending' if configured else 'configuration_required', 'message': message}
+    delivery_status = 'configuration_required'
+    if configured:
+        # Try only this newly registered account. Durable outbox retries SMTP
+        # failures; neither the code nor provider error text is exposed.
+        try:
+            attempt = await process_email_outbox(batch_size=1, only_user_id=user.id)
+            delivery_status = 'sent' if attempt['sent'] else 'retrying'
+        except Exception:
+            delivery_status = 'retrying'
+    message = {
+        'sent': 'Código de confirmação enviado. Verifique também a pasta de spam.',
+        'retrying': 'O e-mail ainda não foi entregue. O serviço continuará tentando; você também pode solicitar outro código.',
+        'configuration_required': 'Cadastro salvo, mas o envio de e-mail precisa ser configurado pelo operador.'
+    }[delivery_status]
+    return {**account_response(user), 'delivery_status': delivery_status, 'message': message}
+
 
 
 @router.post('/login')

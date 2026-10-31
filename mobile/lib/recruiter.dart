@@ -34,6 +34,12 @@ class _RecruiterViewState extends State<RecruiterView> {
     final List jobs = result is List ? result : (result['items'] as List? ?? []);
     return RefreshIndicator(onRefresh: () async { setState(reload); await data; }, child: ListView(padding: const EdgeInsets.all(20), physics: const AlwaysScrollableScrollPhysics(), children: [
       const SectionTitle(title: 'Talentos começam por uma boa oportunidade', subtitle: 'Publique com clareza e acompanhe a aprovação das suas vagas.'),
+      Panel(child: Wrap(spacing: 8, runSpacing: 8, children: [
+        Chip(avatar: const Icon(Icons.schedule_outlined, size: 16), label: Text('Em análise: ${jobs.where((j) => j['active'] == true && j['moderation_status'] == 'pending').length}')),
+        Chip(avatar: const Icon(Icons.verified_outlined, size: 16), label: Text('Aprovadas: ${jobs.where((j) => j['active'] == true && j['moderation_status'] == 'approved').length}')),
+        Chip(avatar: const Icon(Icons.error_outline, size: 16), label: Text('Reprovadas: ${jobs.where((j) => j['active'] == true && j['moderation_status'] == 'rejected').length}')),
+        Chip(avatar: const Icon(Icons.archive_outlined, size: 16), label: Text('Encerradas: ${jobs.where((j) => j['active'] == false).length}')),
+      ])),
       FilledButton.icon(onPressed: create, icon: const Icon(Icons.add), label: const Text('Criar nova vaga')),
       const SizedBox(height: 20), Panel(child: Row(children: [const Icon(Icons.verified_user_outlined, color: Brand.teal), const SizedBox(width: 12), Expanded(child: Text('Todas as vagas passam por moderação antes de aparecer no feed.', style: Theme.of(context).textTheme.bodyMedium))])),
       if (jobs.isEmpty) const EmptyState(icon: Icons.work_outline, title: 'Sua próxima contratação começa aqui', message: 'Crie sua primeira vaga para se conectar aos candidatos.'),

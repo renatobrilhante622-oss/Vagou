@@ -38,6 +38,10 @@ class _AuthScreenState extends State<AuthScreen> {
           if (role == 'recruiter') ...{'company_cnpj': cnpj.text.trim(), 'company_name': company.text.trim(), 'company_contact_email': contact.text.trim(), 'company_phone': phone.text.trim()},
         });
         if (!mounted) return;
+        if (registration['delivery_status'] == 'retrying') {
+          await friendlyError(context, const ApiException('O e-mail ainda não foi entregue; o sistema tentará novamente. Confira a caixa de entrada e solicite novo código após um minuto.'));
+          if (!mounted) return;
+        }
         if (registration['delivery_status'] == 'configuration_required') {
           await friendlyError(context, const ApiException('Sua conta foi criada, mas o serviço de e-mail ainda precisa ser configurado pelo operador. Após a ativação, solicite um novo código para confirmar seu cadastro.'));
           if (!mounted) return;

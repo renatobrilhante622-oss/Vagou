@@ -15,7 +15,7 @@ from app.models import EmailOutbox, EmailVerification, User
 from app.smtp_transport import deliver_confirmation, email_configured
 
 
-async def process_email_outbox(batch_size: int = 50) -> dict:
+async def process_email_outbox(batch_size: int = 50, only_user_id=None) -> dict:
     if not email_configured():
         return {'sent': 0, 'failed': 0, 'configured': False}
     engine = create_async_engine(settings().database_url, pool_pre_ping=True)
@@ -23,9 +23,12 @@ async def process_email_outbox(batch_size: int = 50) -> dict:
     sent = failed = 0
     try:
         async with sessions() as db:
-            due = list((await db.execute(select(EmailOutbox.id, EmailOutbox.user_id).where(
-                EmailOutbox.status == 'pending', EmailOutbox.next_attempt_at <= datetime.now(timezone.utc)
-            ).order_by(EmailOutbox.next_attempt_at, EmailOutbox.id).limit(max(1, min(batch_size, 100))))).all())
+            query = select(EmailOutbox.id, EmailOutbox.user_id).where(
+                EmailOutbox.status == 'pending', EmailOutbox.next_attempt_at <= datetime.now(timezone.utc))
+            if only_user_id is not None:
+                query = query.where(EmailOutbox.user_id == only_user_id)
+            due = list((await db.execute(query.order_by(EmailOutbox.next_attempt_at, EmailOutbox.id)
+                        .limit(max(1, min(batch_size, 100))))).all())
         for outbox_id, user_id in due:
             async with sessions.begin() as db:
                 # Same lock ordering as verify/resend/delete-account prevents races.

@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -50,3 +50,23 @@ async def moderate_job(job_id: uuid.UUID, payload: ModerationDecision, user: Use
 @router.get('/recruiter/jobs', response_model=list[JobOut])
 async def recruiter_jobs(offset: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=100), user: User = Depends(role('recruiter')), db: AsyncSession = Depends(session)):
     return (await db.scalars(select(Job).where(Job.recruiter_id == user.id).order_by(Job.created_at.desc(), Job.id).offset(offset).limit(limit))).all()
+
+
+@router.get('/recruiter/moderation-summary')
+async def recruiter_moderation_summary(user: User = Depends(role('recruiter')),
+                                      db: AsyncSession = Depends(session)):
+    query = (select(Job.moderation_status, Job.active, func.count(Job.id))
+             .where(Job.recruiter_id == user.id)
+             .group_by(Job.moderation_status, Job.active))
+    totals = {'pending': 0, 'approved': 0, 'rejected': 0, 'closed': 0}
+    for status, active, count in (await db.execute(query)).all():
+        if not active:
+            totals['closed'] += count
+        else:
+            totals[status] += count
+    return {'counts': totals, 'guidance': {
+        'pending': 'Em análise pela moderação.',
+        'approved': 'Aprovada e visível aos candidatos.',
+        'rejected': 'Confira o motivo informado na vaga e corrija antes de republicar.',
+        'closed': 'Encerrada pelo recrutador.',
+    }}
