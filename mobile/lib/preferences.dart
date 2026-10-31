@@ -113,7 +113,7 @@ class _PreferencesSheetState extends State<_PreferencesSheet> {
       TextField(controller: _salary, enabled: !_busy, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Salário mínimo', hintText: 'Opcional', prefixText: 'R\$ ', prefixIcon: Icon(Icons.payments_outlined))),
       const SizedBox(height: 16),
       const Text('Tipo de contrato', style: TextStyle(fontWeight: FontWeight.w700)),
-      Wrap(spacing: 8, children: [for (final entry in contractLabels.entries) FilterChip(label: Text(entry.value), selected: _contracts.contains(entry.key), onSelected: _busy ? null : (selected) => setState(() => selected ? _contracts.add(entry.key) : _contracts.remove(entry.key))]),
+      Wrap(spacing: 8, children: [for (final entry in contractLabels.entries) FilterChip(label: Text(entry.value), selected: _contracts.contains(entry.key), onSelected: _busy ? null : (selected) => setState(() => selected ? _contracts.add(entry.key) : _contracts.remove(entry.key)))]),
       TextField(controller: _keywords, enabled: !_busy, decoration: const InputDecoration(labelText: 'Palavras-chave', hintText: 'Python, SQL, atendimento', helperText: 'Separe por vírgula; basta uma palavra aparecer na vaga.', prefixIcon: Icon(Icons.key_outlined))),
       const SizedBox(height: 20),
       FilledButton.icon(onPressed: _busy ? null : _save, icon: _busy ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.check), label: const Text('Salvar preferências')),
