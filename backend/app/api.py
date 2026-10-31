@@ -222,7 +222,7 @@ async def applications(offset: int = Query(0, ge=0), limit: int = Query(20, ge=1
     query = query.where(Application.candidate_id == user.id) if user.role == 'candidate' else query.where(Job.recruiter_id == user.id)
     rows = (await db.execute(query.order_by(Application.created_at.desc(), Application.id).offset(offset).limit(limit))).all()
     return [{'id': a.id, 'job_id': j.id, 'job_title': j.title, 'candidate_id': a.candidate_id,
-             'source': a.source, 'status': a.status, 'match_score': a.match_score, 'created_at': a.created_at,
+             'source': a.source, 'status': a.status, 'match_score': a.match_score, 'created_at': a.created_at, 'status_updated_at': a.status_updated_at,
              'company': j.company, 'job_url': j.source_url, 'job_path': f'/v1/jobs/{j.id}',
              'source_name': j.source_name, 'candidate_name': candidate_name} for a, j, candidate_name in rows]
 
@@ -241,8 +241,9 @@ async def application_status(application_id: uuid.UUID, payload: StatusUpdate, u
     if not application:
         raise HTTPException(404, 'Application not found')
     application.status = payload.status
+    application.status_updated_at = datetime.now(timezone.utc)
     await db.commit()
-    return {'id': application.id, 'status': application.status}
+    return {'id': application.id, 'status': application.status, 'status_updated_at': application.status_updated_at}
 
 
 @router.get('/recruiter/applicants')
@@ -325,6 +326,20 @@ async def courses(skill: str | None = Query(None, max_length=80)):
     return {'items': items[:limit], 'next_offset': offset + limit if len(items) > limit else None,
             'filters_applied': {'min_match': min_match, 'location': location, 'salary_ceiling': salary_ceiling,
                                 'completed_course_id': completed_course_id, 'work_style': work_style}}
+
+
+@router.get('/notifications')
+async def candidate_notifications(limit: int = Query(20, ge=1, le=50), user: User = Candidate, db: AsyncSession = DB):
+    """Most recent status updates; read-only inbox, no false push-delivery claim."""
+    query = (select(Application, Job)
+             .join(Job, Job.id == Application.job_id)
+             .where(Application.candidate_id == user.id, Application.status != 'submitted')
+             .order_by(Application.status_updated_at.desc(), Application.id)
+             .limit(limit))
+    rows = (await db.execute(query)).all()
+    return [{'application_id': application.id, 'job_title': job.title,
+             'status': application.status, 'updated_at': application.status_updated_at}
+            for application, job in rows]
 
 
 @router.get('/dashboard')
