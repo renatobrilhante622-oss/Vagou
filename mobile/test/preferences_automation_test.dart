@@ -38,8 +38,8 @@ void main() {
 
     expect(find.text('Filtros e Preferências'), findsNothing);
     expect(find.text('Meu Plano'), findsOneWidget);
-    await tester.ensureVisible(find.text('Atualizar meu acesso'));
-    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('Atualizar meu acesso'), 300,
+      scrollable: find.byType(Scrollable).first);
     await tester.tap(find.text('Atualizar meu acesso'));
     await tester.pumpAndSettle();
     expect(requests.single.method, 'GET');
@@ -67,8 +67,8 @@ void main() {
     await tester.pumpAndSettle();
     final city = find.byWidgetPredicate((widget) => widget is TextField && widget.decoration?.labelText == 'Cidade');
     await tester.enterText(city, 'Recife');
-    await tester.ensureVisible(find.text('Salvar preferências'));
-    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('Salvar preferências'), 250,
+      scrollable: find.byType(Scrollable).last);
     await tester.tap(find.text('Salvar preferências'));
     await tester.pumpAndSettle();
 
