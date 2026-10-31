@@ -35,7 +35,7 @@ jobs:
           cp pubspec_backup.yaml pubspec.yaml
           rm -rf lib_backup pubspec_backup.yaml
 
-      - name: Configure Android compileSdk 36 and HTTP Cleartext Traffic
+      - name: Force compileSdk 36 globally for app and all plugins
         shell: python
         run: |
           import pathlib, re
@@ -48,7 +48,7 @@ jobs:
                   txt = txt.replace("<application", '<application android:usesCleartextTraffic="true"', 1)
                   manifest.write_text(txt, encoding="utf-8")
 
-          # 2. Atualiza compileSdk = 36 e minSdk = 24 diretamente no build.gradle(.kts) do app
+          # 2. Atualiza compileSdk e targetSdk para 36 no app
           for p in [pathlib.Path("android/app/build.gradle.kts"), pathlib.Path("android/app/build.gradle")]:
               if p.exists():
                   content = p.read_text(encoding="utf-8")
@@ -64,8 +64,31 @@ jobs:
                       content = re.sub(r'minSdk\s+[^\n]+', 'minSdk 24', content)
                       content = re.sub(r'minSdkVersion\s+[^\n]+', 'minSdkVersion 24', content)
                   p.write_text(content, encoding="utf-8")
-                  print(f"--- Updated {p} ---")
-                  print(content)
+
+          # 3. Força todos os subprojetos/plugins (como file_picker) a usarem compileSdk 36 de forma segura
+          for gradle_file in [pathlib.Path("android/build.gradle"), pathlib.Path("android/build.gradle.kts")]:
+              if gradle_file.exists():
+                  code = gradle_file.read_text(encoding="utf-8")
+                  hook = """
+          allprojects {
+              afterEvaluate { project ->
+                  if (project.hasProperty("android")) {
+                      project.android {
+                          if (namespace != null) {
+                              compileSdkVersion 36
+                              if (defaultConfig != null) {
+                                  minSdkVersion 24
+                                  targetSdkVersion 36
+                              }
+                          }
+                      }
+                  }
+              }
+          }
+          """
+                  gradle_file.write_text(code + "\n" + hook, encoding="utf-8")
+                  print(f"Injected global SDK override into {gradle_file}")
+                  break
 
       - name: Install dependencies and build APK
         run: |
