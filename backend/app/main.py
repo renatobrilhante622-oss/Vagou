@@ -42,6 +42,9 @@ async def validation_error(request: Request, exception: RequestValidationError):
     labels = {'password': 'senha', 'email': 'e-mail', 'name': 'nome',
               'company_cnpj': 'CNPJ', 'company_name': 'razão social',
               'company_contact_email': 'e-mail corporativo', 'phone': 'telefone',
+              'company_phone': 'telefone corporativo', 'min_salary': 'pretensão salarial',
+              'modalities': 'modalidade', 'titles': 'cargo de interesse',
+              'skills': 'competências', 'completed_course_ids': 'cursos concluídos',
               'code': 'código de confirmação', 'locations': 'cidade/estado'}
     for error in exception.errors():
         field = str(error['loc'][-1])
@@ -53,6 +56,14 @@ async def validation_error(request: Request, exception: RequestValidationError):
             message = f'Preencha o campo {label}.'
         elif field == 'email' or field.endswith('_email'):
             message = 'Informe um endereço de e-mail válido.'
+        elif field == 'company_cnpj':
+            message = 'Informe um CNPJ válido com 14 caracteres e dígitos verificadores corretos.'
+        elif field in ('phone', 'company_phone'):
+            message = 'Informe um telefone válido com DDD, como +5511999999999.'
+        elif field == 'min_salary':
+            message = 'Informe uma pretensão salarial válida, sem símbolos ou separadores incorretos.'
+        elif field == 'locations':
+            message = 'Informe cidade e estado, como Brasília / DF.'
         elif field == 'code':
             message = 'Digite o código de seis dígitos enviado ao seu e-mail.'
         else:
