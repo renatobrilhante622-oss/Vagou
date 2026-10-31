@@ -13,6 +13,17 @@ Role = Literal['candidate', 'recruiter']
 Modality = Literal['remote', 'hybrid', 'onsite']
 
 
+def normalize_br_phone(value: str | None) -> str | None:
+    if value is None or not value.strip():
+        return None
+    digits = re.sub(r'\D', '', value)
+    if len(digits) in (10, 11):
+        digits = '55' + digits
+    if len(digits) not in (12, 13) or not digits.startswith('55'):
+        raise ValueError('Informe telefone com DDD válido, como +5511999999999.')
+    return '+' + digits
+
+
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
 
@@ -27,14 +38,19 @@ class Register(StrictModel):
     company_cnpj: str | None = Field(default=None, max_length=18)
     company_name: str | None = Field(default=None, min_length=2, max_length=200)
     company_contact_email: EmailStr | None = None
-    company_phone: str | None = Field(default=None, pattern=r'^\+55\d{10,11}$')
+    company_phone: str | None = None
+
+    @field_validator('company_phone')
+    @classmethod
+    def valid_company_phone(cls, value):
+        return normalize_br_phone(value)
 
     @field_validator('company_cnpj')
     @classmethod
     def cnpj_valid(cls, value):
         if value is None:
             return value
-        normalized = re.sub(r'[./-]', '', value).upper()
+        normalized = re.sub(r'[^A-Za-z0-9]', '', value).upper()
         if not valid_cnpj(normalized):
             raise ValueError('Informe um CNPJ válido, com dígitos verificadores corretos.')
         return normalized
@@ -71,7 +87,12 @@ class Skills(StrictModel):
 
 class ProfileUpdate(Skills):
     name: str = Field(min_length=2, max_length=120)
-    phone: str | None = Field(default=None, pattern=r'^\+55\d{10,11}$')
+    phone: str | None = None
+
+    @field_validator('phone')
+    @classmethod
+    def phone_normalized(cls, value):
+        return normalize_br_phone(value)
 
 
 class Preferences(StrictModel):
@@ -79,6 +100,7 @@ class Preferences(StrictModel):
     min_salary: float = Field(default=0, ge=0, le=1000000, allow_inf_nan=False)
     modalities: list[Modality] = Field(default_factory=list, max_length=3)
     locations: list[str] = Field(default_factory=list, max_length=20)
+    completed_course_ids: list[str] = Field(default_factory=list, max_length=50)
     automation_enabled: bool = False
     automation_max_applications_per_run: int = Field(default=20, ge=1, le=100)
     automation_interval_minutes: int = Field(default=60, ge=15, le=1440)
@@ -88,6 +110,15 @@ class Preferences(StrictModel):
         if any(modality in ['onsite', 'hybrid'] for modality in self.modalities) and not self.locations:
             raise ValueError('Informe a cidade e o estado para vagas presenciais ou híbridas.')
         return self
+
+    @field_validator('completed_course_ids')
+    @classmethod
+    def completed_courses_valid(cls, value):
+        from app.courses import COURSES
+        allowed = {course['id'] for course in COURSES}
+        if any(course not in allowed for course in value):
+            raise ValueError('Selecione somente cursos disponíveis no catálogo Vagou!.')
+        return list(dict.fromkeys(value))
 
     @field_validator('titles', 'locations')
     @classmethod
