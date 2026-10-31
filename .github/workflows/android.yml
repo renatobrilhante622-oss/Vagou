@@ -35,19 +35,48 @@ jobs:
           cp pubspec_backup.yaml pubspec.yaml
           rm -rf lib_backup pubspec_backup.yaml
 
-      - name: Configure Android compileSdk 36 and HTTP traffic
+      - name: Force compileSdk 36 and HTTP Cleartext Traffic
+        shell: python
         run: |
-          sed -i 's/<application/<application android:usesCleartextTraffic="true"/g' android/app/src/main/AndroidManifest.xml
-          if [ -f "android/app/build.gradle.kts" ]; then
-            sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 36/g' android/app/build.gradle.kts
-            sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 23/g' android/app/build.gradle.kts
-          fi
-          if [ -f "android/app/build.gradle" ]; then
-            sed -i 's/compileSdk flutter.compileSdkVersion/compileSdk 36/g' android/app/build.gradle
-            sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 36/g' android/app/build.gradle
-            sed -i 's/minSdk flutter.minSdkVersion/minSdk 23/g' android/app/build.gradle
-            sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 23/g' android/app/build.gradle
-          fi
+          import pathlib, re
+
+          # 1. Libera tráfego HTTP local no AndroidManifest.xml
+          manifest = pathlib.Path("android/app/src/main/AndroidManifest.xml")
+          if manifest.exists():
+              txt = manifest.read_text(encoding="utf-8")
+              if "usesCleartextTraffic" not in txt:
+                  txt = txt.replace("<application", '<application android:usesCleartextTraffic="true"', 1)
+                  manifest.write_text(txt, encoding="utf-8")
+
+          # 2. Força compileSdk = 36 e minSdk = 24 no build.gradle(.kts) do app
+          for p in [pathlib.Path("android/app/build.gradle.kts"), pathlib.Path("android/app/build.gradle")]:
+              if p.exists():
+                  content = p.read_text(encoding="utf-8")
+                  content = re.sub(r'compileSdk\s*=?\s*flutter\.compileSdkVersion', 'compileSdk = 36' if p.suffix == '.kts' else 'compileSdk 36', content)
+                  content = re.sub(r'compileSdkVersion\s+flutter\.compileSdkVersion', 'compileSdkVersion 36', content)
+                  content = re.sub(r'targetSdk\s*=?\s*flutter\.targetSdkVersion', 'targetSdk = 36' if p.suffix == '.kts' else 'targetSdk 36', content)
+                  content = re.sub(r'minSdk\s*=?\s*flutter\.minSdkVersion', 'minSdk = 24' if p.suffix == '.kts' else 'minSdk 24', content)
+                  content = re.sub(r'minSdkVersion\s+flutter\.minSdkVersion', 'minSdkVersion 24', content)
+                  # Garante também substituição caso o Flutter use outro nome de variável
+                  content = re.sub(r'compileSdk\s*=\s*\d+', 'compileSdk = 36', content)
+                  p.write_text(content, encoding="utf-8")
+                  print(f"Updated {p}")
+
+          # 3. Força todos os subprojetos/plugins a compilarem com SDK 36
+          root_kts = pathlib.Path("android/build.gradle.kts")
+          if root_kts.exists():
+              extra = """
+          subprojects {
+              afterEvaluate {
+                  if (extensions.findByName("android") != null) {
+                      extensions.configure<com.android.build.gradle.BaseExtension>("android") {
+                          compileSdkVersion(36)
+                      }
+                  }
+              }
+          }
+          """
+              root_kts.write_text(root_kts.read_text(encoding="utf-8") + "\n" + extra, encoding="utf-8")
 
       - name: Install dependencies and build APK
         run: |
