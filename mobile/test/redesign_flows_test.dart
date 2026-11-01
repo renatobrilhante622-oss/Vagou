@@ -27,10 +27,9 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('IA de Recrutamento & Automação de Carreira'),
           findsOneWidget);
-      await tester.scrollUntilVisible(
-          find.text('Sou Recrutador / Empresa'), 160,
+      await tester.scrollUntilVisible(find.text('Sou Recrutador'), 160,
           scrollable: find.byType(Scrollable).first);
-      await tester.tap(find.text('Sou Recrutador / Empresa'));
+      await tester.tap(find.text('Sou Recrutador'));
       await tester.scrollUntilVisible(
           find.text('Ainda não tem conta? Cadastre-se'), 200,
           scrollable: find.byType(Scrollable).first);

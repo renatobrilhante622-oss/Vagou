@@ -180,10 +180,10 @@ class CollectorTests(unittest.TestCase):
     def test_all_portals_are_independent_and_outage_keeps_eight_honest_search_channels(self):
         async def unavailable(*args, **kwargs):
             raise httpx.ConnectError('publisher unavailable')
-        with patch('app.collectors.collect_brazilian_portal', side_effect=unavailable):
+        with patch('app.collectors.collect_brazilian_portal', side_effect=unavailable), patch('app.collectors.collect_public_recruitment_feed', side_effect=unavailable):
             sources, failures = asyncio.run(collect_authorized_sources([], [], 4096, 20,
                 preferences={'titles': ['Suporte'], 'locations': ['Brasília / DF']}))
-        self.assertEqual(failures, 8)
+        self.assertEqual(failures, 8 + len(collectors.PUBLIC_RECRUITMENT_FEEDS))
         self.assertEqual(sum(len(source.jobs) for source in sources), 0)
         channels = [channel for source in sources for channel in source.search_channels]
         self.assertEqual({channel.source_name for channel in channels}, {portal.name for portal in BRAZILIAN_PORTALS})
@@ -199,7 +199,7 @@ class CollectorTests(unittest.TestCase):
             return CollectedSource('Gupy', parse_gupy_response({'data': [gupy_record()]}), True)
         async def scenario():
             prefs = {'titles': ['Suporte'], 'locations': ['Brasília / DF']}
-            with patch('app.collectors.collect_brazilian_portal', side_effect=collect):
+            with patch('app.collectors.collect_brazilian_portal', side_effect=collect), patch('app.collectors.PUBLIC_RECRUITMENT_FEEDS', ()):
                 first = await collect_authorized_sources([], [], 4096, 20, preferences=prefs)
                 second = await collect_authorized_sources([], [], 4096, 20, preferences=prefs)
             return first, second
@@ -219,3 +219,27 @@ class CollectorTests(unittest.TestCase):
         self.assertIn('city=Goiânia', unquote(gupy.external_url))
         infojobs = next(channel for channel in channels if channel.source_name == 'InfoJobs')
         self.assertIn('/empregos-em-goias.aspx?', infojobs.external_url)
+
+class PublicRecruitmentFeedTests(unittest.TestCase):
+    def test_direct_rh_feed_follows_only_same_publisher_and_keeps_real_company(self):
+        from app.collectors import collect_public_recruitment_feed
+        feed='https://publisher.example.org/feed/'
+        link='https://publisher.example.org/2026/analista-suporte/'
+        xml=f'<rss><channel><item><title>Analista de Suporte</title><link>{link}</link></item><item><title>Analista de Suporte</title><link>https://attacker.example/job</link></item></channel></rss>'
+        detail=posting(link).replace('"url":', '"applicationContact": {"email": "rh@example.com"}, "validThrough": "2099-01-01T18:00:00Z", "url":')
+        original=httpx.AsyncClient
+        observed=[]
+        def factory(**kwargs):
+            def respond(request):
+                observed.append(str(request.url))
+                return httpx.Response(200,headers={'content-type':'application/rss+xml' if str(request.url)==feed else 'text/html'},text=xml if str(request.url)==feed else detail)
+            return original(**kwargs,transport=httpx.MockTransport(respond))
+        with patch('app.collectors.httpx.AsyncClient',side_effect=factory):
+            result=asyncio.run(collect_public_recruitment_feed('RH público',feed,{'titles':['Suporte']},asyncio.Semaphore(2),4096,20))
+        self.assertEqual(len(result.jobs),1)
+        job=result.jobs[0]
+        self.assertEqual((job.company,job.contact_email,job.country),('Empresa Anunciante','rh@example.com','BR'))
+        self.assertEqual(job.expires_at.year,2099)
+        self.assertEqual(observed,[feed,link])
+        for local in ['vagas','talentos','dp','curriculo','selecao']:
+            self.assertEqual(collectors.recruitment_contact({},f'Envie seu currículo para {local}@example.com'),f'{local}@example.com')

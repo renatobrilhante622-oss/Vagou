@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'api.dart';
+import 'admin.dart';
 import 'candidate.dart';
 import 'courses.dart';
 import 'jobs.dart';
@@ -54,7 +55,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final name = (widget.user['name']?.toString() ?? '').split(' ').first;
     final screens = recruiter
         ? <Widget>[
             RecruiterView(api: widget.api, user: widget.user),
@@ -75,6 +75,10 @@ class _HomeScreenState extends State<HomeScreen> {
           title: VagouBrandMark(
               size: 34, premium: widget.user['is_premium'] == true),
           actions: [
+            if (widget.user['is_admin'] == true)
+              TextButton(
+                  onPressed: () => openAdmin(context, widget.api, widget.user),
+                  child: const Text('🛡️ Admin')),
             PopupMenuButton<String>(
                 enabled: !busy,
                 tooltip: 'Minha conta',
@@ -93,21 +97,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     ]),
           ]),
       body: Column(children: [
-        Padding(
-            padding: const EdgeInsets.fromLTRB(20, 4, 20, 10),
-            child: Row(children: [
-              Expanded(
-                  child: Text(
-                      'Olá, $name. ${recruiter ? 'Vamos conectar talentos?' : 'Qual será seu próximo passo?'}',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color:
-                              Theme.of(context).colorScheme.onSurfaceVariant))),
-              if (busy)
-                const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2))
-            ])),
         Expanded(child: IndexedStack(index: tab, children: screens)),
       ]),
       bottomNavigationBar: Container(

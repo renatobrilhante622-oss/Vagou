@@ -17,4 +17,5 @@ def premium_test_emails() -> set[str]:
 
 
 def has_premium_access(user) -> bool:
-    return bool(user.is_premium or (user.email and user.email.casefold() in premium_test_emails()))
+    from app.access import is_owner
+    return bool(is_owner(user) or user.is_premium or (user.email and user.email.casefold() in premium_test_emails()))

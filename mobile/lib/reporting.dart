@@ -171,13 +171,9 @@ class _ReportsViewState extends State<ReportsView> {
             child: ListView(
                 padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
                 children: [
-                  const ExecutiveHero(
-                      title: 'Sua carreira em movimento',
-                      subtitle:
-                          'Registro, encaminhamento e retorno em uma visão executiva.',
-                      eyebrow: 'RELATÓRIOS DE CARREIRA',
-                      trailing: Icon(Icons.insights,
-                          size: 36, color: Color(0xFF93C5FD))),
+                  const SectionTitle(
+                      title: 'Relatórios',
+                      subtitle: 'Candidaturas e resultados das buscas'),
                   LayoutBuilder(
                       builder: (context, constraints) =>
                           Wrap(spacing: 12, children: [

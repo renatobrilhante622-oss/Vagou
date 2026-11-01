@@ -395,10 +395,13 @@ def evaluate_job(job, skills: list[str], preferences: dict) -> dict:
     if not semantic_match:
         score = min(score, 39)
         missed.append('Cargo, área ou palavra-chave técnica não corresponde à sua busca.')
-    if minimum and float(job.salary_max or 0) == 0:
-        score = min(score, 69)  # Unknown remuneration cannot authorize a paid-range submission.
-    if inferred:
-        score = min(score, 69)  # An unconfirmed skill mention never auto-submits.
+    exact_goal = bool(titles and title_match) or bool(not titles and keywords and covered > 0)
+    known_salary_conflict = minimum and float(job.salary_max or 0)>0 and float(job.salary_max)<minimum
+    if exact_goal and compatible_region(job,preferences) and (not modalities or job.modality in modalities) and not known_salary_conflict:
+        # Goal compatibility, not a probability of hiring or verified skill mastery.
+        score = max(75,min(98,score))
+        if inferred:
+            reasons.append('Requisitos extraídos do anúncio; confirme as qualificações com a empresa.')
     if adjacent_role:
         score = min(score, 69)  # Related roles remain an individual decision.
     incompatible = filter_reason(job, preferences)
@@ -431,7 +434,7 @@ def filter_reason(job, preferences: dict) -> str | None:
     if preferences.get('titles') and not any(title_matches(job.title, t) for t in preferences['titles']):
         return 'Cargo fora dos títulos desejados.'
     contract_types = preferences.get('contract_types') or []
-    if contract_types and getattr(job, 'contract_type', None) not in contract_types:
+    if contract_types and getattr(job, 'contract_type', None) is not None and job.contract_type not in contract_types:
         return 'Tipo de contrato não selecionado.'
     keywords = [canonical_text(value) for value in preferences.get('keywords', []) if normalize(value)]
     if keywords:

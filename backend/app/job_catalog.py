@@ -1,5 +1,6 @@
 """Brazilian catalog maintenance without deleting application audit history."""
 import logging
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from sqlalchemy import select, update
@@ -33,11 +34,12 @@ async def quarantine_non_brazilian_jobs() -> int:
                 rows = (await db.execute(query)).all()
                 if not rows:
                     break
+                expired = set((await db.scalars(select(Job.id).where(Job.id.in_([row.id for row in rows]), Job.expires_at <= datetime.now(timezone.utc)))).all())
                 excluded = []
                 repairs = []
                 for row in rows:
                     observed = job_location_details(SimpleNamespace(**row._mapping))
-                    if not observed['is_brazilian']:
+                    if row.id in expired or not observed['is_brazilian']:
                         excluded.append(row.id)
                         continue
                     values = {'city': observed['city'], 'state': observed['state'], 'country': 'BR'}

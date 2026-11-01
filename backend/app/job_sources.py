@@ -182,7 +182,7 @@ def recruitment_contact(record: dict, description: str = '') -> str | None:
         address = contact_email(entry.get('email') if isinstance(entry, dict) else entry)
         if address:
             return address
-    recruitment = re.compile(r'\b(?:rh|recrutamento|recruitment|recruiting|careers|hiring|selecao|curriculo|curriculos|candidatura|candidaturas)\b')
+    recruitment = re.compile(r'\b(?:rh|recrutamento|recruitment|recruiting|careers|hiring|selecao|curriculo|curriculos|vagas|talentos|dp|candidatura|candidaturas)\b')
     organization = record.get('hiringOrganization') or {}
     points = record.get('contactPoint') or (organization.get('contactPoint') if isinstance(organization, dict) else None) or []
     for point in points if isinstance(points, list) else [points]:
@@ -221,6 +221,8 @@ class ExternalJob:
     city: str | None = None
     state: str | None = None
     country: str | None = None
+
+    expires_at: datetime | None = None
 
     def values(self):
         return asdict(self)
@@ -353,6 +355,17 @@ def _jsonld_values(document):
         graph = item.get('@graph')
         expanded.extend(graph if isinstance(graph, list) else [item])
     return expanded
+
+
+def posting_expiration(record: dict) -> datetime | None:
+    value = record.get('validThrough') or record.get('expires_at')
+    if not isinstance(value, str) or not value.strip(): return None
+    try:
+        expiration = datetime.fromisoformat(value.strip().replace('Z', '+00:00'))
+        if len(value.strip()) == 10:
+            expiration = expiration.replace(hour=23, minute=59, second=59)
+        return expiration.replace(tzinfo=timezone.utc) if expiration.tzinfo is None else expiration
+    except ValueError: return None
 
 
 def _posting_expired(record: dict) -> bool:
@@ -493,7 +506,7 @@ def parse_job_postings(html: str, page_url: str, max_jobs: int = 200) -> list[Ex
                 jobs.append(ExternalJob(identity, title, company, description, location, modality,
                     sorted({plain(tag, 80).casefold() for tag in tags if plain(tag, 80)})[:100],
                     minimum, maximum, contract, url, recruitment_contact(record, record.get('description', '')),
-                    city or None, state, country))
+                    city or None, state, country, posting_expiration(record)))
             except (FeedError, TypeError, ValueError):
                 continue
             if len(jobs) >= max_jobs:

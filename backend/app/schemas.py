@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated, Literal
 from uuid import UUID
 import re
@@ -29,7 +29,73 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
 
 
-class Register(StrictModel):
+class CandidateDetails(StrictModel):
+    @field_validator('phone', check_fields=False)
+    @classmethod
+    def candidate_phone(cls, value):
+        return normalize_br_phone(value)
+
+    birth_date: date | None = None
+    cpf: str | None = None
+    phone: str | None = None
+    seniority: Literal['junior','pleno','senior','especialista','gestor','estagio'] | None = None
+    linkedin_url: str | None = Field(default=None, max_length=500)
+    professional_summary: str | None = Field(default=None, max_length=4000)
+    candidate_city: str | None = Field(default=None, max_length=80)
+    candidate_state: str | None = None
+    desired_salary: float | None = Field(default=None, ge=0, le=1000000, allow_inf_nan=False)
+
+    @field_validator('birth_date', mode='before')
+    @classmethod
+    def parse_birth_date(cls, value):
+        if value in (None, ''):
+            return None
+        if isinstance(value,str) and '/' in value:
+            value = datetime.strptime(value,'%d/%m/%Y').date()
+        result = date.fromisoformat(value) if isinstance(value,str) else value
+        if result > date.today() or result.year < 1900:
+            raise ValueError('Informe uma data de nascimento válida.')
+        return result
+
+    @field_validator('cpf', mode='before')
+    @classmethod
+    def valid_cpf(cls, value):
+        if value in (None, ''):
+            return None
+        digits = re.sub(r'[.\s-]','',str(value))
+        if not digits.isdigit() or len(digits)!=11 or len(set(digits))==1:
+            raise ValueError('Informe um CPF válido.')
+        for count in (9,10):
+            total=sum(int(digits[i])*(count+1-i) for i in range(count))
+            if int(digits[count]) != (total*10%11)%10:
+                raise ValueError('Informe um CPF válido.')
+        return digits
+
+    @field_validator('linkedin_url')
+    @classmethod
+    def valid_linkedin(cls, value):
+        if not value:
+            return None
+        from urllib.parse import urlsplit
+        link=urlsplit(value)
+        if link.scheme!='https' or link.hostname not in {'linkedin.com','www.linkedin.com','br.linkedin.com'} or link.username or link.password:
+            raise ValueError('Informe seu endereço HTTPS oficial do LinkedIn.')
+        return value
+
+    @field_validator('candidate_state')
+    @classmethod
+    def valid_candidate_state(cls,value):
+        if not value:
+            return None
+        from app.job_sources import state_code
+        result=state_code(value)
+        if not result:
+            raise ValueError('Informe uma UF brasileira válida.')
+        return result
+
+
+
+class Register(CandidateDetails):
     email: EmailStr
     password: Password = Field(min_length=12, max_length=128)
     name: str = Field(min_length=2, max_length=120)
@@ -86,7 +152,7 @@ class Skills(StrictModel):
         return sorted(set(x.strip().casefold() for x in value))
 
 
-class ProfileUpdate(Skills):
+class ProfileUpdate(Skills, CandidateDetails):
     name: str = Field(min_length=2, max_length=120)
     phone: str | None = None
 
@@ -203,6 +269,15 @@ class AutomationEventsReport(StrictModel):
 
 
 class JobCreate(StrictModel):
+    expires_at: datetime | None = None
+
+    @field_validator('expires_at')
+    @classmethod
+    def expiration_timezone(cls, value):
+        if value is not None and value.tzinfo is None:
+            raise ValueError('Informe a validade com fuso horário.')
+        return value
+
     title: str = Field(min_length=2, max_length=160)
     company: str = Field(min_length=2, max_length=160)
     contact_email: EmailStr | None = None
@@ -255,6 +330,11 @@ class JobCreate(StrictModel):
 
 
 class PublicJobOut(JobCreate):
+    @field_validator('featured', mode='before', check_fields=False)
+    @classmethod
+    def pending_featured_default(cls,value):
+        return bool(value)
+
     model_config = ConfigDict(from_attributes=True)
     # Public publishers may omit structured skills. Keep that absence honest;
     # recruiter-created vacancies still require at least one declared skill.
@@ -265,6 +345,9 @@ class PublicJobOut(JobCreate):
     moderation_status: Literal['pending', 'approved', 'rejected'] = 'pending'
     source_url: str | None = None
     source_name: str = 'Vagou!'
+    featured: bool = False
+    company_verified: bool = False
+
     company_name: str | None = None
     external_url: str | None = None
     recruiter_email: EmailStr | None = None
@@ -280,6 +363,8 @@ class PublicJobOut(JobCreate):
 
 
 class JobOut(PublicJobOut):
+    moderated_by_user_id: UUID | None = None
+    moderation_notes: str | None = None
     moderation_note: str | None = None
     moderated_at: datetime | None = None
 
@@ -299,4 +384,18 @@ class ResendVerification(StrictModel):
 
 class ModerationDecision(StrictModel):
     status: Literal['approved', 'rejected']
+    note: str = Field(default='', max_length=1000)
+
+
+class AdminUserUpdate(StrictModel):
+    role: Literal['candidate','recruiter','moderator','super_admin'] | None = None
+    is_premium: bool | None = None
+    is_active: bool | None = None
+    email_verified: bool | None = None
+    company_verified: bool | None = None
+    note: str = Field(default='', max_length=1000)
+
+
+class AdminJobAction(StrictModel):
+    action: Literal['approve','reject','feature','unfeature','delete']
     note: str = Field(default='', max_length=1000)

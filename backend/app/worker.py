@@ -35,6 +35,7 @@ celery.conf.update(
         'verification-mail': {'task': 'vagou.deliver_verification_mail', 'schedule': 15.0},
         'authorized-job-feeds': {'task': 'vagou.refresh_job_sources', 'schedule': 900.0},
         'application-mail': {'task': 'vagou.deliver_application_mail', 'schedule': 15.0},
+        'system-mail': {'task': 'vagou.deliver_system_mail', 'schedule': 15.0},
     },
 )
 
@@ -102,7 +103,7 @@ async def automate(candidate_id=None, force=False, run_id=None, progress=None):
         cursor = None
         while True:
             async with sessions() as db:
-                query = select(User.id).where(User.role == 'candidate', User.email_verified.is_(True),
+                query = select(User.id).where(User.role.in_(['candidate','super_admin','moderator']), User.is_active.is_(True), User.email_verified.is_(True),
                     User.automation_enabled.is_(True)).order_by(User.id).limit(100)
                 query = query.where(or_(User.is_premium.is_(True), func.lower(User.email).in_(allowed_test_emails))) if allowed_test_emails else query.where(User.is_premium.is_(True))
                 if candidate_id:
@@ -138,7 +139,7 @@ async def automate(candidate_id=None, force=False, run_id=None, progress=None):
                         user = await db.scalar(select(User).where(User.id == user_id).with_for_update(skip_locked=True))
                         if not user:
                             continue
-                        if not user.email_verified or not has_premium_access(user) or not user.automation_enabled:
+                        if not user.is_active or not user.email_verified or not has_premium_access(user) or not user.automation_enabled:
                             if run_id:
                                 cancelled = await db.get(AutomationRun, run_id)
                                 if cancelled and cancelled.candidate_id == user.id:
@@ -329,7 +330,9 @@ async def refresh_job_sources(preferences: dict | None = None):
         sources, failed = await collect_authorized_sources(cfg.job_source_urls,
             cfg.job_source_allowed_hosts, cfg.job_source_max_bytes, cfg.job_source_max_jobs,
             preferences=preferences)
+        source_health = {}
         for source in sources:
+            source_health.update(getattr(source, 'health', {}))
             search_channels.extend(asdict(channel) for channel in getattr(source, 'search_channels', []))
             async with sessions.begin() as db:
                 for job in source.jobs:
@@ -342,12 +345,12 @@ async def refresh_job_sources(preferences: dict | None = None):
                     updates = {key: getattr(statement.excluded, key) for key in (
                         'title', 'company', 'description', 'location', 'modality', 'contract_type',
                         'keywords', 'salary_min', 'salary_max', 'source_url', 'contact_email',
-                        'city', 'state', 'country')}
+                        'city', 'state', 'country', 'expires_at')}
                     result = await db.execute(statement.on_conflict_do_update(
                         index_elements=['source_name', 'source_external_id'], set_=updates).returning(Job.id))
                     imported += int(result.scalar_one_or_none() is not None)
         return {'imported': imported, 'collected_jobs': collected, 'failed_sources': failed,
-            'configured': True, 'search_channels': search_channels, 'archived_jobs': archived}
+            'configured': True, 'search_channels': search_channels, 'archived_jobs': archived, 'source_health': source_health}
     finally:
         await engine.dispose()
 
@@ -374,3 +377,27 @@ def deliver_verification_mail():
 def deliver_application_mail():
     from app.mailer import process_application_outbox
     return asyncio.run(process_application_outbox())
+
+
+@celery.task(name='vagou.deliver_system_mail')
+def deliver_system_mail():
+    from app.system_mail import process_notices
+    return asyncio.run(process_notices())
+
+
+@celery.task(name='vagou.sync_admin_sources')
+def sync_admin_sources(actor_id):
+    async def execute():
+        from app.collectors import _source_cache
+        from app.models import AdminAudit
+        _source_cache.clear()
+        result=await refresh_job_sources({'keywords':['vagas']})
+        engine=create_async_engine(settings().database_url)
+        try:
+            sessions=async_sessionmaker(engine)
+            async with sessions.begin() as db:
+                actor=await db.get(User,UUID(actor_id))
+                db.add(AdminAudit(actor_id=actor.id if actor else None,action='sync_completed',target_type='sources',details={key:value for key,value in result.items() if key!='search_channels'}))
+            return result
+        finally: await engine.dispose()
+    return asyncio.run(execute())

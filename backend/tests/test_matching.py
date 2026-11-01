@@ -55,7 +55,7 @@ class MatchingTests(unittest.TestCase):
         discarded = evaluate_job(job, [], {**preferences, 'titles': ['Engenheiro'], 'keywords': ['java'],
             'locations': ['Brasília / DF'], 'modalities': ['onsite'], 'contract_types': ['pj'], 'min_salary': 10000})
         self.assertEqual(strong['category'], 'strong')
-        self.assertEqual(strong['match_score'], 100)
+        self.assertEqual(strong['match_score'], 98)
         self.assertGreaterEqual(high_preference_partial_skills['match_score'], 70)
         self.assertEqual(high_preference_partial_skills['category'], 'strong')
         self.assertEqual(possible['category'], 'possible')
@@ -95,27 +95,27 @@ class InternationalMatchingTests(unittest.TestCase):
             modality='remote', location='Brasil', contract_type=None)
         result = evaluate_job(job, ['sql', 'planilhas'], {'titles': ['Analista de Dados'],
             'locations': ['Brasília / DF'], 'modalities': ['remote']})
-        self.assertEqual(result['match_score'], 100)
+        self.assertEqual(result['match_score'], 98)
         self.assertEqual(result['category'], 'strong')
         self.assertTrue(eligible(job, {'titles': ['Analista de Dados'], 'locations': ['Goiânia / GO']}))
         self.assertTrue(result['match_reasons'])
         self.assertEqual(match(['js'], ['javascript'])['match_score'], 100)
         self.assertEqual(match(['java'], ['javascript'])['match_score'], 0)
 
-    def test_missing_salary_or_inferred_skills_remain_possible_not_auto(self):
+    def test_goal_fit_is_high_without_inventing_salary_or_skill_verification(self):
         job = SimpleNamespace(title='Python Developer', description='Build APIs using Python and Docker.',
             keywords=['python'], salary_max=0, salary_min=0, modality='remote', location='Remoto Brasil', contract_type=None)
         preferences = {'titles': ['Desenvolvedor Python'], 'locations': ['São Paulo / SP'],
             'modalities': ['remote'], 'min_salary': 5000}
         self.assertTrue(eligible(job, preferences))
         result = evaluate_job(job, ['python', 'docker'], preferences)
-        self.assertEqual(result['category'], 'possible')
-        self.assertLess(result['match_score'], 70)
+        self.assertEqual(result['category'], 'strong')
+        self.assertGreaterEqual(result['match_score'], 75)
         self.assertTrue(any('salarial não informada' in value for value in result['missed_reasons']))
         job.salary_max = 7000
         job.keywords = []
         result = evaluate_job(job, ['python', 'docker'], preferences)
-        self.assertEqual(result['category'], 'possible')
+        self.assertEqual(result['category'], 'strong')
         self.assertTrue(any('inferidas' in value for value in result['missed_reasons']))
         job.location = 'Germany'
         self.assertFalse(eligible(job, preferences))
@@ -234,3 +234,13 @@ class ProfessionalRelevanceTests(unittest.TestCase):
                 'locations':['Brasília / DF'], 'modalities':['onsite'], 'min_salary':3000})
             self.assertLess(result['match_score'], 40)
             self.assertEqual(result['category'], 'discarded')
+
+class GoalBasedExternalScore(unittest.TestCase):
+    def test_missing_contract_salary_and_inferred_requirements_do_not_cap_goal_fit(self):
+        job=SimpleNamespace(title='Analista de Suporte N2',description='Requisitos: Windows e redes corporativas.',
+            keywords=[],salary_min=0,salary_max=0,contract_type=None,modality='onsite',location='Brasília / DF',country='BR')
+        preferences={'titles':['Analista de Suporte N2'],'locations':['Brasília / DF'],'modalities':['onsite'],'contract_types':['clt'],'min_salary':3000}
+        result=evaluate_job(job,['windows'],preferences)
+        self.assertTrue(75 <= result['match_score'] <= 98,result)
+        self.assertEqual(result['category'],'strong')
+        self.assertIsNone(filter_reason(job,preferences))

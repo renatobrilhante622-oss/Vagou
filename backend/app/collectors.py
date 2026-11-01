@@ -45,6 +45,7 @@ class CollectedSource:
     jobs: list[ExternalJob]
     auto_approve: bool = False
     search_channels: list[SearchChannel] = field(default_factory=list)
+    health: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -308,7 +309,7 @@ async def _public_page(client: httpx.AsyncClient, url: str, allowed_hosts: tuple
                     continue
                 response.raise_for_status()
                 content_type = response.headers.get('content-type', '').lower()
-                if not any(value in content_type for value in ('text/html', 'application/json')):
+                if not any(value in content_type for value in ('text/html', 'application/json', 'application/rss+xml', 'application/atom+xml', 'application/xml', 'text/xml')):
                     raise FeedError('O portal não respondeu com anúncios públicos legíveis.')
                 body = bytearray()
                 async for chunk in response.aiter_bytes():
@@ -431,6 +432,46 @@ async def collect_brazilian_portal(portal: BrazilianPortal, preferences: dict, m
     return CollectedSource(portal.name, _normalize_brazilian(jobs)[:max_jobs], auto_approve=True)
 
 
+PUBLIC_RECRUITMENT_FEEDS = (
+    ('Vagas DF · RH público', 'https://www.vagasdf.com.br/feed/'),
+    ('Empregos DF · RH público', 'https://www.empregosdf.com.br/feed/'),
+)
+
+
+async def collect_public_recruitment_feed(name, url, preferences, semaphore, max_bytes, max_jobs):
+    """Read advertised contacts from a public feed and bounded same-host details.
+
+    Generic articles without an identifiable employer, Brazilian location and
+    actual JobPosting are excluded; no email address is guessed or generated.
+    """
+    from app.job_sources import parse_rss
+    from xml.etree import ElementTree
+    host = urlsplit(url).hostname
+    async with httpx.AsyncClient(timeout=httpx.Timeout(6), follow_redirects=False, headers=PUBLIC_HEADERS) as client:
+        page, canonical = await _public_page(client, url, (host,), max_bytes, semaphore)
+        jobs = parse_rss(page.encode(), max_jobs=max_jobs)
+        root = ElementTree.fromstring(page)
+        links = []
+        for node in root.iter():
+            if node.tag.rsplit('}', 1)[-1] not in {'item', 'entry'}: continue
+            title = next((str(child.text or '') for child in node if child.tag.rsplit('}', 1)[-1] == 'title'), '')
+            if not related_title(title, _query(preferences)) and not title_matches(title, _query(preferences)): continue
+            for child in node:
+                if child.tag.rsplit('}', 1)[-1] != 'link': continue
+                link = child.attrib.get('href') or child.text or ''
+                if urlsplit(link).hostname == host and link not in links: links.append(link)
+        async def detail(link):
+            try:
+                html, final_url = await _public_page(client, link, (host,), max_bytes, semaphore)
+                return parse_job_postings(html, final_url, max_jobs=2)
+            except Exception as error:
+                logger.info('recruitment_feed_detail_unavailable source=%s error_type=%s', name, type(error).__name__)
+                return []
+        for result in await asyncio.gather(*(detail(link) for link in links[:4])): jobs.extend(result)
+    observed = [job for job in _normalize_brazilian(jobs) if job.contact_email]
+    return CollectedSource(name, observed[:max_jobs], auto_approve=True)
+
+
 async def collect_authorized_sources(urls: list[str], allowed_hosts: list[str],
                                     max_bytes: int, max_jobs: int,
                                     concurrency: int = 4,
@@ -441,6 +482,7 @@ async def collect_authorized_sources(urls: list[str], allowed_hosts: list[str],
         if cached and cached[0] > monotonic():
             return cached[1], cached[2]
     semaphore = asyncio.Semaphore(max(1, min(concurrency, 8)))
+    health = {}
 
     async def collect(url):
         try:
@@ -448,27 +490,45 @@ async def collect_authorized_sources(urls: list[str], allowed_hosts: list[str],
                 async with semaphore:
                     return await fetch_feed(url, allowed_hosts, max_bytes, max_jobs)
             jobs = await asyncio.wait_for(read(), timeout=14)
-            return CollectedSource(source_name(url), _normalize_brazilian(jobs))
+            observed = _normalize_brazilian(jobs)
+            health[source_name(url)] = {'status':'ok','jobs':len(observed)}
+            return CollectedSource(source_name(url), observed)
         except Exception as error:
+            health[source_name(url)] = {'status':'unavailable','error_type':type(error).__name__}
             logger.info('brazil_feed_unavailable source=%s error_type=%s', source_name(url), type(error).__name__)
             return None
 
     async def builtin(portal):
         try:
-            return await asyncio.wait_for(collect_brazilian_portal(portal, preferences,
+            result = await asyncio.wait_for(collect_brazilian_portal(portal, preferences,
                 max_jobs=min(max_jobs, 30), semaphore=semaphore, max_bytes=max_bytes), timeout=14)
+            health[portal.name] = {'status':'ok','jobs':len(result.jobs)}
+            return result
         except Exception as error:
+            health[portal.name] = {'status':'unavailable','error_type':type(error).__name__}
             logger.info('brazil_portal_unavailable source=%s error_type=%s fallback=regional_search', portal.name, type(error).__name__)
+            return None
+
+    async def recruitment_feed(name, url):
+        try:
+            result = await asyncio.wait_for(collect_public_recruitment_feed(name, url, preferences,
+                semaphore, max_bytes, min(max_jobs, 20)), timeout=10)
+            health[name] = {'status':'ok','jobs':len(result.jobs)}
+            return result
+        except Exception as error:
+            health[name] = {'status':'unavailable','error_type':type(error).__name__}
+            logger.info('recruitment_feed_unavailable source=%s error_type=%s', name, type(error).__name__)
             return None
 
     tasks = [collect(url) for url in urls[:20]]
     if preferences:
         tasks.extend(builtin(portal) for portal in BRAZILIAN_PORTALS)
+        tasks.extend(recruitment_feed(name, url) for name, url in PUBLIC_RECRUITMENT_FEEDS)
     results = await asyncio.gather(*tasks)
     sources = [result for result in results if result is not None]
     failures = len(results) - len(sources)
     if preferences is not None:
-        sources.append(CollectedSource('Canais regionais brasileiros', [], search_channels=regional_search_channels(preferences)))
+        sources.append(CollectedSource('Canais regionais brasileiros', [], search_channels=regional_search_channels(preferences), health=health))
     async with _cache_lock:
         _source_cache[cache_key] = (monotonic() + PUBLIC_SOURCE_CACHE_SECONDS, sources, failures)
         for key, value in list(_source_cache.items()):

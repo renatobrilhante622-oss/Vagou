@@ -91,6 +91,12 @@ async def register(payload: Register, db: AsyncSession = Depends(session)):
                 company_cnpj=payload.company_cnpj, company_name=payload.company_name,
                 company_contact_email=str(payload.company_contact_email).casefold() if payload.company_contact_email else None,
                 phone_encrypted=cipher().encrypt(payload.company_phone.encode()).decode() if payload.company_phone else None)
+    for key in ('birth_date','seniority','linkedin_url','professional_summary','candidate_city','candidate_state','desired_salary'):
+        setattr(user,key,getattr(payload,key))
+    user.cpf_encrypted=cipher().encrypt(payload.cpf.encode()).decode() if payload.cpf else None
+    if payload.phone:
+        from app.schemas import normalize_br_phone
+        user.phone_encrypted=cipher().encrypt(normalize_br_phone(payload.phone).encode()).decode()
     db.add(user)
     try:
         await db.flush()
@@ -113,10 +119,13 @@ async def register(payload: Register, db: AsyncSession = Depends(session)):
 async def login(payload: Login, db: AsyncSession = Depends(session)):
     user = await db.scalar(select(User).where(User.email == str(payload.email).casefold()))
     valid = await asyncio.to_thread(verify_password, payload.password, user.password_hash if user else DUMMY_HASH)
-    if not user or not valid:
+    if not user or not valid or not user.is_active:
         raise HTTPException(401, 'E-mail ou senha incorretos. Confira seus dados e tente novamente.')
     if not user.email_verified:
         raise HTTPException(403, {'code': 'email_verification_required', 'message': 'Confirme seu e-mail com o código recebido para entrar.'})
+    from app.access import ensure_owner
+    ensure_owner(user)
+    await db.commit()
     return {'access_token': token(user), 'token_type': 'bearer', 'expires_in': settings().access_minutes * 60}
 
 
@@ -137,6 +146,8 @@ async def verify_email(payload: VerifyEmail, db: AsyncSession = Depends(session)
         await db.commit()  # Failed attempts must survive the error response.
         raise invalid
     user.email_verified = True
+    from app.access import ensure_owner
+    ensure_owner(user)
     await db.delete(challenge)
     await db.execute(delete(EmailOutbox).where(EmailOutbox.user_id == user.id))
     await db.commit()

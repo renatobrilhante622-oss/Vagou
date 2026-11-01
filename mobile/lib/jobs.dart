@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'api.dart';
+import 'forms.dart';
 import 'automation_panel.dart';
 import 'opportunity_details.dart';
 import 'preferences.dart';
@@ -16,8 +17,10 @@ class JobsView extends StatefulWidget {
 class _JobsViewState extends State<JobsView> {
   final List<Map<String, dynamic>> items = [];
   int? next;
+  int _loadVersion = 0;
   bool loading = true, loadingMore = false;
   String category = 'high';
+  bool radar = false;
   Object? error;
   Map<String, dynamic> user = {}, preferences = {};
   Map<String, dynamic> collectorStatus = {};
@@ -60,6 +63,19 @@ class _JobsViewState extends State<JobsView> {
   }
 
   Future<void> load({bool more = false}) async {
+    final version = ++_loadVersion;
+    if (radar && user['is_premium'] != true) {
+      if (mounted)
+        setState(() {
+          loading = false;
+          loadingMore = false;
+          items.clear();
+          next = null;
+          error = null;
+          collectorStatus = {};
+        });
+      return;
+    }
     setState(() {
       if (more) {
         loadingMore = true;
@@ -69,9 +85,9 @@ class _JobsViewState extends State<JobsView> {
       error = null;
     });
     try {
-      final result = await widget.api
-          .request('GET', '/matches?offset=${more ? next ?? 0 : 0}&limit=30');
-      if (!mounted) return;
+      final result = await widget.api.request('GET',
+          '${radar ? '/radar' : '/internal-jobs'}?offset=${more ? next ?? 0 : 0}&limit=30');
+      if (!mounted || version != _loadVersion) return;
       setState(() {
         if (!more) items.clear();
         items.addAll(
@@ -81,9 +97,9 @@ class _JobsViewState extends State<JobsView> {
             result['collector_status'] as Map? ?? const {});
       });
     } catch (e) {
-      if (mounted) setState(() => error = e);
+      if (mounted && version == _loadVersion) setState(() => error = e);
     } finally {
-      if (mounted)
+      if (mounted && version == _loadVersion)
         setState(() {
           loading = false;
           loadingMore = false;
@@ -92,6 +108,12 @@ class _JobsViewState extends State<JobsView> {
   }
 
   Future<void> apply(Map<String, dynamic> job) async {
+    if (user.isEmpty) await _loadAccount();
+    if (!mounted) return;
+    if (user['has_resume'] != true) {
+      await requireResume(context);
+      return;
+    }
     final id = job['id'].toString();
     if (pending.contains(id)) return;
     // Imported external opportunities require the candidate's manual review.
@@ -202,9 +224,11 @@ class _JobsViewState extends State<JobsView> {
               : 'Não conseguimos carregar suas vagas.',
           onRetry: load);
     final visible = items
-        .where((e) => category == 'high'
-            ? e['category'] == 'high'
-            : e['category'] == 'observation')
+        .where((e) =>
+            !radar ||
+            (category == 'high'
+                ? e['category'] == 'high'
+                : e['category'] == 'observation'))
         .toList();
     return RefreshIndicator(
         onRefresh: load,
@@ -215,8 +239,7 @@ class _JobsViewState extends State<JobsView> {
               Row(children: [
                 const Expanded(
                     child: SectionTitle(
-                        title: 'Seu próximo capítulo',
-                        subtitle: 'Busca & filtros')),
+                        title: 'Oportunidades', subtitle: 'Busca & filtros')),
                 IconButton(
                     onPressed: _editPreferences,
                     tooltip: 'Editar critérios de busca',
@@ -239,55 +262,74 @@ class _JobsViewState extends State<JobsView> {
                     label: const Text('Filtros e Preferências')),
               ]),
               const SizedBox(height: 12),
-              Container(
-                  margin: const EdgeInsets.only(bottom: 16),
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                          colors: [Color(0xFF0F172A), Color(0xFF1E293B)]),
-                      borderRadius: BorderRadius.circular(14)),
-                  child: Row(children: [
-                    const VagouBrandMark(size: 38, showName: false),
-                    const SizedBox(width: 12),
-                    const Expanded(
-                        child: Text('Seu próximo passo pode ser automático.',
-                            style: TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w600))),
-                    const SizedBox(width: 6),
-                    IconButton(
-                        onPressed: () => showAutomationPanel(context,
-                            api: widget.api,
-                            onChanged: _refreshAfterAutomation),
-                        tooltip: 'Automação Premium ⚡',
-                        icon: const Icon(Icons.arrow_forward,
-                            color: Colors.white))
-                  ])),
-              LayoutBuilder(
-                  builder: (context, constraints) => SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: SizedBox(
-                          width: constraints.maxWidth < 340
-                              ? 340
-                              : constraints.maxWidth,
-                          child: SegmentedButton<String>(
-                              segments: const [
-                                ButtonSegment(
-                                    value: 'high',
-                                    label: Text('Match alto'),
-                                    icon: Icon(Icons.bolt)),
-                                ButtonSegment(
-                                    value: 'observation',
-                                    label: Text('Possíveis vagas'),
-                                    icon: Icon(Icons.travel_explore))
-                              ],
-                              selected: {
-                                category
-                              },
-                              onSelectionChanged: (v) =>
-                                  setState(() => category = v.first))))),
+              Wrap(spacing: 8, runSpacing: 8, children: [
+                ChoiceChip(
+                    label: const Text('Vagas no App (Empresas)'),
+                    selected: !radar,
+                    onSelected: (_) {
+                      setState(() => radar = false);
+                      load();
+                    }),
+                ChoiceChip(
+                    label: const Text('Radar de Vagas (IA)'),
+                    selected: radar,
+                    onSelected: (_) async {
+                      if (user.isEmpty) await _loadAccount();
+                      if (!mounted) return;
+                      setState(() => radar = true);
+                      load();
+                    }),
+              ]),
+              const SizedBox(height: 12),
+              if (radar && user['is_premium'] != true)
+                Panel(
+                    child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                      const Text('Radar exclusivo PRO',
+                          style: TextStyle(fontWeight: FontWeight.w700)),
+                      const Text(
+                          'Pesquisa regional, compatibilidade e automação com seu currículo.'),
+                      OutlinedButton(
+                          onPressed: () async {
+                            await _loadAccount();
+                            if (user['is_premium'] == true) await load();
+                          },
+                          child: const Text('Conhecer PRO / atualizar acesso')),
+                    ])),
+              if (radar && user['is_premium'] == true) ...[
+                FilledButton.icon(
+                    onPressed: () => showAutomationPanel(context,
+                        api: widget.api, onChanged: _refreshAfterAutomation),
+                    icon: const Icon(Icons.bolt),
+                    label: const Text('Robô de Automação')),
+                const SizedBox(height: 12),
+                LayoutBuilder(
+                    builder: (context, constraints) => SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: SizedBox(
+                            width: constraints.maxWidth < 340
+                                ? 340
+                                : constraints.maxWidth,
+                            child: SegmentedButton<String>(
+                                segments: const [
+                                  ButtonSegment(
+                                      value: 'high',
+                                      label: Text('Match alto'),
+                                      icon: Icon(Icons.bolt)),
+                                  ButtonSegment(
+                                      value: 'observation',
+                                      label: Text('Possíveis vagas'),
+                                      icon: Icon(Icons.travel_explore))
+                                ],
+                                selected: {
+                                  category
+                                },
+                                onSelectionChanged: (v) =>
+                                    setState(() => category = v.first))))),
+              ],
               const SizedBox(height: 18),
-              if (category == 'observation')
+              if (radar && category == 'observation')
                 const Padding(
                     padding: EdgeInsets.only(bottom: 16),
                     child: Text(
@@ -302,7 +344,11 @@ class _JobsViewState extends State<JobsView> {
                 const Panel(
                     child: Text(
                         'As fontes consultadas não retornaram vagas aprovadas compatíveis agora. Tente novamente mais tarde ou ajuste os filtros.')),
-              if (visible.isEmpty)
+              if (!radar && visible.isEmpty)
+                const Panel(
+                    child: Text(
+                        'Novas vagas de empresas aparecerão aqui após aprovação. Nenhum anúncio fictício é publicado.')),
+              if (radar && visible.isEmpty && user['is_premium'] == true)
                 const Panel(
                     child: EmptyState(
                         icon: Icons.manage_search,
@@ -363,7 +409,11 @@ class _JobsViewState extends State<JobsView> {
             ...job,
             'match_score': item['match_score'],
             'match_reasons': item['match_reasons']
-          }),
+          }, showScore: radar),
+          if (job['company_verified'] == true)
+            const Chip(
+                avatar: Icon(Icons.verified, size: 16),
+                label: Text('Empresa Verificada')),
           if ((item['missing_skills'] as List? ?? []).isNotEmpty)
             Padding(
                 padding: const EdgeInsets.only(top: 12),
@@ -389,7 +439,7 @@ class _JobsViewState extends State<JobsView> {
                     ? 'Enviada'
                     : job['source_url'] != null && job['recruiter_id'] == null
                         ? 'Abrir vaga'
-                        : 'Candidatar')),
+                        : 'Candidatar-se com 1 Toque')),
           ]),
         ]));
   }

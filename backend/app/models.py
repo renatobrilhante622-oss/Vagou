@@ -1,7 +1,7 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text, UniqueConstraint, Uuid, func
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text, UniqueConstraint, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -17,6 +17,16 @@ class User(Base):
     company_name: Mapped[str | None] = mapped_column(String(200))
     company_contact_email: Mapped[str | None] = mapped_column(String(254))
     role: Mapped[str] = mapped_column(String(16))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default='true')
+    company_verified: Mapped[bool] = mapped_column(Boolean, default=False, server_default='false')
+    birth_date: Mapped[date | None] = mapped_column(Date)
+    cpf_encrypted: Mapped[str | None] = mapped_column(Text)
+    seniority: Mapped[str | None] = mapped_column(String(32))
+    linkedin_url: Mapped[str | None] = mapped_column(Text)
+    professional_summary: Mapped[str | None] = mapped_column(Text)
+    candidate_city: Mapped[str | None] = mapped_column(String(80))
+    candidate_state: Mapped[str | None] = mapped_column(String(2))
+    desired_salary: Mapped[float | None] = mapped_column(Numeric(12, 2))
     name: Mapped[str] = mapped_column(String(120))
     phone_encrypted: Mapped[str | None] = mapped_column(Text)
     skills: Mapped[list] = mapped_column(JSON, default=list)
@@ -29,9 +39,14 @@ class User(Base):
     consent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     __table_args__ = (
-        CheckConstraint("role IN ('candidate','recruiter')"),
+        CheckConstraint("role IN ('candidate','recruiter','moderator','super_admin')", name='ck_user_role'),
         UniqueConstraint('company_cnpj', name='uq_users_company_cnpj'),
     )
+
+
+    @property
+    def is_admin(self):
+        return self.role in {'super_admin','moderator'}
 
 
 class Job(Base):
@@ -54,6 +69,8 @@ class Job(Base):
     moderation_status: Mapped[str] = mapped_column(String(16), default='pending', server_default='pending', index=True)
     moderation_note: Mapped[str | None] = mapped_column(String(1000))
     moderated_by: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    featured: Mapped[bool] = mapped_column(Boolean, default=False, server_default='false')
     moderated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     source_url: Mapped[str | None] = mapped_column(Text)
     source_external_id: Mapped[str | None] = mapped_column(String(255))
@@ -66,6 +83,18 @@ class Job(Base):
         CheckConstraint("moderation_status IN ('pending','approved','rejected')", name='ck_job_moderation_status'),
         CheckConstraint("modality IN ('remote','hybrid','onsite')"),
     )
+
+    @property
+    def moderated_by_user_id(self):
+        return self.moderated_by
+
+    @property
+    def moderation_notes(self):
+        return self.moderation_note
+
+    @property
+    def company_verified(self):
+        return bool(getattr(self, '_company_verified', False))
 
     @property
     def company_name(self) -> str:
@@ -147,3 +176,26 @@ class ApplicationNotification(Base):
         UniqueConstraint('dedup_key', name='uq_application_notifications_dedup'),
         CheckConstraint("status IN ('pending','sent','failed','cancelled')", name='ck_application_notification_status'),
     )
+
+
+class AdminAudit(Base):
+    __tablename__ = 'admin_audits'
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey('users.id', ondelete='SET NULL'), index=True)
+    action: Mapped[str] = mapped_column(String(64))
+    target_type: Mapped[str] = mapped_column(String(32))
+    target_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    details: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class SystemNotification(Base):
+    __tablename__ = 'system_notifications'
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('users.id', ondelete='CASCADE'), index=True)
+    payload_encrypted: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(16), default='pending', index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    __table_args__ = (CheckConstraint("status IN ('pending','sent','failed','cancelled')", name='ck_system_notification_status'),)

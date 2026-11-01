@@ -49,6 +49,8 @@ def test_report_safe_links_and_no_false_delivery_claim(cfg):
 def test_recruiter_current_pdf_and_reply_address(cfg):
     payload = {'candidate_name': 'Ana', 'candidate_email': 'candidate@example.com',
                'candidate_phone': '+5511999999999', 'skills': ['python'],
+               'birth_date':'1990-05-14','candidate_city':'Brasília','candidate_state':'DF','seniority':'senior',
+               'linkedin_url':'https://www.linkedin.com/in/example','professional_summary':'Suporte a redes corporativas.',
                'job_title': 'Backend\nDeveloper', 'company_name': 'Company', 'match_score': 90}
     with patch('app.application_mail.settings', return_value=cfg):
         message = mail.recruiter_message('recruiter@example.com', payload, b'%PDF-1.7 fixture')
@@ -58,7 +60,10 @@ def test_recruiter_current_pdf_and_reply_address(cfg):
     assert len(attachments) == 1
     assert attachments[0].get_content_type() == 'application/pdf'
     assert attachments[0].get_payload(decode=True) == b'%PDF-1.7 fixture'
-    assert 'não comprova recebimento' in message.get_body(preferencelist=('plain',)).get_content()
+    body=message.get_body(preferencelist=('plain',)).get_content()
+    assert 'não comprova recebimento' in body
+    assert 'Brasília / DF' in body and '1990-05-14' in body and 'Suporte a redes' in body
+    assert 'CPF' not in body
 
 
 def test_private_resume_authenticated_and_bounded(cfg):

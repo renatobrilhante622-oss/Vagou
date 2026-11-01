@@ -34,7 +34,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title='Vagou!', version='1.0.0', lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=settings().allowed_origins, allow_methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], allow_headers=['Authorization', 'Content-Type'])
+app.add_middleware(CORSMiddleware, allow_origins=settings().allowed_origins, allow_methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], allow_headers=['Authorization', 'Content-Type', 'ngrok-skip-browser-warning'])
 
 
 @app.exception_handler(RequestValidationError)
@@ -47,7 +47,10 @@ async def validation_error(request: Request, exception: RequestValidationError):
               'company_phone': 'telefone corporativo', 'min_salary': 'pretensão salarial',
               'modalities': 'modalidade', 'titles': 'cargo de interesse',
               'skills': 'competências', 'completed_course_ids': 'cursos concluídos',
-              'code': 'código de confirmação', 'locations': 'cidade/estado'}
+              'code': 'código de confirmação', 'locations': 'cidade/estado',
+              'birth_date':'data de nascimento', 'cpf':'CPF', 'seniority':'senioridade',
+              'linkedin_url':'LinkedIn', 'professional_summary':'resumo profissional',
+              'candidate_city':'cidade', 'candidate_state':'UF', 'desired_salary':'pretensão salarial'}
     for error in exception.errors():
         field = str(error['loc'][-1])
         label = labels.get(field, 'campo informado')
@@ -62,7 +65,15 @@ async def validation_error(request: Request, exception: RequestValidationError):
             message = 'Informe um CNPJ válido com 14 caracteres e dígitos verificadores corretos.'
         elif field in ('phone', 'company_phone'):
             message = 'Informe um telefone válido com DDD, como +5511999999999.'
-        elif field == 'min_salary':
+        elif field == 'birth_date':
+            message = 'Informe uma data de nascimento válida no formato DD/MM/AAAA.'
+        elif field == 'cpf':
+            message = 'Confira os 11 dígitos do CPF ou deixe o campo opcional vazio.'
+        elif field == 'linkedin_url':
+            message = 'Informe seu endereço HTTPS oficial do LinkedIn.'
+        elif field == 'candidate_state':
+            message = 'Selecione uma UF brasileira válida.'
+        elif field in ('min_salary', 'desired_salary'):
             message = 'Informe uma pretensão salarial válida, sem símbolos ou separadores incorretos.'
         elif field == 'locations':
             message = 'Informe cidade e estado, como Brasília / DF.'
@@ -112,6 +123,8 @@ async def ready(request: Request):
     return {'status': 'ready'}
 
 
+from app.admin import router as admin_router
+app.include_router(admin_router)
 app.include_router(router)
 app.include_router(auth_router)
 app.include_router(moderation_router)

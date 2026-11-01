@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'api.dart';
+import 'forms.dart';
 import 'preferences.dart';
 import 'opportunity_details.dart';
 import 'ui.dart';
@@ -182,6 +183,10 @@ class _AutomationPanelState extends State<_AutomationPanel> {
   }
 
   Future<void> _start() async {
+    if (_user['has_resume'] != true) {
+      await requireResume(context);
+      return;
+    }
     setState(() => _busy = true);
     try {
       final response = await widget.api.request('POST', '/automation/run',
@@ -439,7 +444,6 @@ class _AutomationPanelState extends State<_AutomationPanel> {
                               foregroundColor: Colors.white),
                           onPressed: _busy ||
                                   active ||
-                                  _user['has_resume'] != true ||
                                   _user['automation_enabled'] != true
                               ? null
                               : _start,

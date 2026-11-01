@@ -17,7 +17,7 @@ router = APIRouter(prefix='/v1', tags=['Moderação'])
 
 async def moderator(user: User = Depends(current_user)) -> User:
     allowed = {address.strip().casefold() for address in settings().moderator_emails}
-    if not user.email_verified or user.email.casefold() not in allowed:
+    if not user.email_verified or (user.email.casefold() not in allowed and user.role not in {'super_admin','moderator'}):
         raise HTTPException(403, 'Esta área está disponível apenas para a equipe de moderação.')
     return user
 
@@ -42,6 +42,11 @@ async def moderate_job(job_id: uuid.UUID, payload: ModerationDecision, user: Use
     job.moderation_note = payload.note.strip() or None
     job.moderated_by = user.id
     job.moderated_at = datetime.now(timezone.utc)
+    from app.admin import audit
+    audit(db,user,'job_'+payload.status,'job',job.id,{'note':payload.note})
+    if job.recruiter_id:
+        from app.system_mail import queue_notice
+        await queue_notice(db,job.recruiter_id,'Atualização da sua vaga no Vagou!',f'Vaga: {job.title}\nStatus: {payload.status}\nMotivo: {payload.note or "Revisão concluída."}')
     await db.commit()
     await db.refresh(job)
     return job

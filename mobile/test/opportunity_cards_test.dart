@@ -52,10 +52,12 @@ void viewport(WidgetTester tester, double width) {
 void main() {
   test('salary ranges use Brazilian formatting and collapse equal values', () {
     expect(
-        opportunitySalary({...opportunity, 'salary_min': 1750.0, 'salary_max': 1750}),
+        opportunitySalary(
+            {...opportunity, 'salary_min': 1750.0, 'salary_max': 1750}),
         'R\$ 1.750');
     expect(
-        opportunitySalary({...opportunity, 'salary_min': 2500, 'salary_max': 3500}),
+        opportunitySalary(
+            {...opportunity, 'salary_min': 2500, 'salary_max': 3500}),
         'R\$ 2.500 a R\$ 3.500');
   });
 
@@ -130,8 +132,11 @@ void main() {
       (tester) async {
     viewport(tester, 320);
     final api = Api(client: MockClient((request) async {
-      if (request.url.path == '/v1/me') return response({'preferences': {}});
-      if (request.url.path == '/v1/matches')
+      if (request.url.path == '/v1/me')
+        return response({'preferences': {}, 'is_premium': true});
+      if (request.url.path == '/v1/internal-jobs')
+        return response({'items': [], 'next_offset': null});
+      if (request.url.path == '/v1/radar')
         return response({
           'items': [
             {
@@ -158,12 +163,15 @@ void main() {
         theme: Brand.theme(Brightness.light),
         home: Scaffold(body: JobsView(api: api, onUserChanged: () async {}))));
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Radar de Vagas (IA)'));
+    await tester.tap(find.text('Radar de Vagas (IA)'));
+    await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('Possíveis vagas'));
     await tester.tap(find.text('Possíveis vagas'));
     await tester.pumpAndSettle();
     expect(find.textContaining('fonte(s) externa(s) não responderam'),
         findsNothing);
-    await tester.scrollUntilVisible(find.text('📧 E-mail da vaga'), 250,
+    await tester.scrollUntilVisible(find.text('📧 E-mail RH'), 250,
         scrollable: find.byType(Scrollable).first);
     expect(find.text(contact), findsOneWidget);
     expect(find.text('Competências próximas do perfil.'), findsOneWidget);
@@ -208,7 +216,7 @@ void main() {
         find.text('Analista de Suporte e Sistemas N2'), 350,
         scrollable: find.byType(Scrollable).first);
     expect(find.text('Analista de Suporte e Sistemas N2'), findsOneWidget);
-    await tester.scrollUntilVisible(find.text('📧 E-mail da vaga'), 250,
+    await tester.scrollUntilVisible(find.text('📧 E-mail RH'), 250,
         scrollable: find.byType(Scrollable).first);
     expect(find.text(contact), findsOneWidget);
     expect(find.text('Competências próximas do perfil.'), findsOneWidget);

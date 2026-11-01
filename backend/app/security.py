@@ -32,8 +32,12 @@ async def current_user(credentials: HTTPAuthorizationCredentials | None = Depend
         cfg = settings()
         claims = jwt.decode(credentials.credentials, cfg.jwt_secret.get_secret_value(), algorithms=['HS256'], issuer=cfg.issuer, audience=cfg.audience, options={'require': ['sub', 'exp', 'iat', 'ver', 'jti']})
         user = await db.get(User, UUID(claims['sub']))
-        if not user or not user.email_verified or user.token_version != claims['ver']:
+        if not user or not user.email_verified or not user.is_active or user.token_version != claims['ver']:
             raise ValueError
+        from app.access import ensure_owner, is_owner
+        if is_owner(user) and (user.role != 'super_admin' or not user.is_premium):
+            ensure_owner(user)
+            await db.commit()
         return user
     except (jwt.PyJWTError, ValueError, KeyError, TypeError):
         raise HTTPException(401, 'Invalid or expired token', headers={'WWW-Authenticate': 'Bearer'}) from None
@@ -41,7 +45,7 @@ async def current_user(credentials: HTTPAuthorizationCredentials | None = Depend
 
 def role(required: str):
     async def dependency(user: User = Depends(current_user)):
-        if user.role != required:
+        if user.role != required and not (user.role in {'super_admin', 'moderator'} and required == 'candidate') and not (user.role == 'super_admin' and required == 'recruiter'):
             raise HTTPException(403, 'Role not allowed')
         return user
     return dependency

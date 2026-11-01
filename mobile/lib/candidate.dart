@@ -1,6 +1,8 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'api.dart';
+import 'forms.dart';
+import 'admin.dart';
 import 'automation_panel.dart';
 import 'ui.dart';
 import 'profile.dart';
@@ -21,6 +23,19 @@ class CandidateProfile extends StatefulWidget {
 class _CandidateProfileState extends State<CandidateProfile> {
   final _profileKey = GlobalKey<FormState>();
   late final TextEditingController _name, _phone, _skills;
+  final _details = {
+    for (final key in [
+      'birth_date',
+      'cpf',
+      'seniority',
+      'linkedin_url',
+      'professional_summary',
+      'candidate_city',
+      'candidate_state',
+      'desired_salary'
+    ])
+      key: TextEditingController()
+  };
   bool _premium = false, _busy = false;
 
   @override
@@ -28,7 +43,13 @@ class _CandidateProfileState extends State<CandidateProfile> {
     super.initState();
     final user = widget.user;
     _name = TextEditingController(text: '${user['name'] ?? ''}');
-    _phone = TextEditingController(text: '${user['phone'] ?? ''}');
+    _phone = TextEditingController(
+        text: formatBrazilPhone('${user['phone'] ?? ''}'));
+    for (final entry in _details.entries) {
+      entry.value.text = entry.key == 'birth_date'
+          ? birthDateDisplay(user[entry.key])
+          : '${user[entry.key] ?? ''}';
+    }
     _skills =
         TextEditingController(text: (user['skills'] as List? ?? []).join(', '));
     _premium = user['is_premium'] == true;
@@ -36,7 +57,7 @@ class _CandidateProfileState extends State<CandidateProfile> {
 
   @override
   void dispose() {
-    for (final controller in [_name, _phone, _skills]) {
+    for (final controller in [_name, _phone, _skills, ..._details.values]) {
       controller.dispose();
     }
     super.dispose();
@@ -109,7 +130,7 @@ class _CandidateProfileState extends State<CandidateProfile> {
     final completion = [
       _name.text.trim().isNotEmpty,
       user['email_verified'] == true,
-      (_phone.text.trim().isNotEmpty),
+      (brazilPhonePayload(_phone.text) != null),
       skills.isNotEmpty,
       user['has_resume'] == true,
       target.isNotEmpty,
@@ -119,6 +140,13 @@ class _CandidateProfileState extends State<CandidateProfile> {
     return ListView(
         padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
         children: [
+          if (user['is_admin'] == true)
+            Panel(
+                child: ListTile(
+                    leading: const Icon(Icons.admin_panel_settings),
+                    title: const Text('🛡️ Admin'),
+                    subtitle: const Text('Central de Comando'),
+                    onTap: () => openAdmin(context, widget.api, user))),
           ExecutiveDossier(
               name: '${user['name']}',
               email: '${user['email']}',
@@ -162,6 +190,7 @@ class _CandidateProfileState extends State<CandidateProfile> {
                     const SizedBox(height: 16),
                     TextFormField(
                         controller: _phone,
+                        inputFormatters: [BrazilPhoneFormatter()],
                         enabled: !_busy,
                         keyboardType: TextInputType.phone,
                         decoration: const InputDecoration(
@@ -169,8 +198,9 @@ class _CandidateProfileState extends State<CandidateProfile> {
                             hintText: '+5511999999999',
                             prefixIcon: Icon(Icons.phone_outlined)),
                         validator: (value) => value != null &&
-                                value.isNotEmpty &&
-                                !RegExp(r'^\+55\d{10,11}$').hasMatch(value)
+                                brazilPhonePayload(value) != null &&
+                                !RegExp(r'^\+55\d{10,11}$')
+                                    .hasMatch(brazilPhonePayload(value) ?? '')
                             ? 'Use +55, DDD e seu número, sem espaços.'
                             : null),
                     const SizedBox(height: 16),
@@ -184,6 +214,9 @@ class _CandidateProfileState extends State<CandidateProfile> {
                             hintText: 'Python, atendimento, Excel, gestão...',
                             helperText: 'Separe as competências por vírgula.',
                             prefixIcon: Icon(Icons.auto_awesome_outlined))),
+                    const SizedBox(height: 14),
+                    CandidateDetailsFields(
+                        controllers: _details, enabled: !_busy),
                     if (skills.isNotEmpty)
                       Padding(
                           padding: const EdgeInsets.only(top: 12),
@@ -205,9 +238,9 @@ class _CandidateProfileState extends State<CandidateProfile> {
                                         await widget.api
                                             .request('PUT', '/me/profile', {
                                           'name': _name.text.trim(),
-                                          'phone': _phone.text.isEmpty
-                                              ? null
-                                              : _phone.text,
+                                          'phone':
+                                              brazilPhonePayload(_phone.text),
+                                          ...candidateDetailsPayload(_details),
                                           'skills': _terms(_skills.text)
                                         });
                                       }, 'Perfil salvo com sucesso.');

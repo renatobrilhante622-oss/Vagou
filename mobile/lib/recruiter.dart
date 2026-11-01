@@ -571,6 +571,25 @@ class _RecruiterApplicationsState extends State<RecruiterApplications> {
                           path: phone.replaceAll(RegExp(r'[^+0-9]'), ''))),
                       icon: const Icon(Icons.phone_outlined),
                       label: const Text('Ligar para candidato')),
+                if (phone.isNotEmpty)
+                  TextButton.icon(
+                      onPressed: () => _openContact(Uri.https('wa.me',
+                          '/${phone.replaceAll(RegExp(r'[^0-9]'), '')}')),
+                      icon: const Icon(Icons.chat_outlined),
+                      label: const Text('Abrir WhatsApp')),
+                if (candidate['candidate_birth_date'] != null)
+                  Text(
+                      'Nascimento: ${candidate['candidate_birth_date']} · ${candidate['candidate_age'] ?? '—'} anos'),
+                if (candidate['candidate_city'] != null)
+                  Text(
+                      'Cidade/UF: ${candidate['candidate_city']} / ${candidate['candidate_state'] ?? ''}'),
+                if (candidate['candidate_seniority'] != null)
+                  Text('Senioridade: ${candidate['candidate_seniority']}'),
+                if (candidate['candidate_linkedin'] != null)
+                  TextButton(
+                      onPressed: () => _openContact(Uri.parse(
+                          candidate['candidate_linkedin'].toString())),
+                      child: const Text('Abrir LinkedIn')),
                 const SizedBox(height: 18),
                 Text('Resumo do currículo',
                     style: Theme.of(sheetContext)

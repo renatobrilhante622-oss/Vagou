@@ -65,13 +65,33 @@ class OpportunityReasons extends StatelessWidget {
   Widget build(BuildContext context) {
     final reasons = uniqueOpportunityReasons(row['match_reasons'],
         detail: row['detail']?.toString());
-    return reasons.isEmpty
+    final labels = <String>[];
+    for (final reason in reasons) {
+      final text = reason.toLowerCase();
+      final label = text.contains('cargo compatível')
+          ? '✓ Cargo Compatível'
+          : text.contains('cidade/uf compat') ||
+                  text.contains('localização compat')
+              ? '✓ ${opportunityLocation(row)}'
+              : text.contains('%') ||
+                      text.contains('palavras-chave') ||
+                      text.contains('pendentes') ||
+                      text.contains('inferidas') ||
+                      reason.length > 65
+                  ? null
+                  : reason;
+      if (label != null && !labels.contains(label)) labels.add(label);
+    }
+    return labels.isEmpty
         ? const SizedBox.shrink()
         : Padding(
-            padding: const EdgeInsets.only(top: 12),
-            child: Text(reasons.join(' · '),
-                style: TextStyle(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant)),
+            padding: const EdgeInsets.only(top: 8),
+            child: Wrap(spacing: 6, runSpacing: 4, children: [
+              for (final label in labels.take(3))
+                Chip(
+                    visualDensity: VisualDensity.compact,
+                    label: Text(label, softWrap: true))
+            ]),
           );
   }
 }
@@ -252,7 +272,7 @@ class _OpportunityDetailsState extends State<OpportunityDetails> {
                 borderRadius: BorderRadius.circular(12)),
             child:
                 Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('📧 E-mail da vaga',
+              const Text('📧 E-mail RH',
                   style: TextStyle(fontWeight: FontWeight.w800)),
               const SizedBox(height: 4),
               const Text('Canal direto do RH', style: TextStyle(fontSize: 11)),

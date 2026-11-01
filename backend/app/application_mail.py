@@ -81,7 +81,7 @@ async def _recruiter_address(db, job) -> str | None:
         return contact
     if job.recruiter_id:
         recruiter = await db.get(User, job.recruiter_id)
-        if recruiter and recruiter.role == 'recruiter' and recruiter.email_verified:
+        if recruiter and recruiter.role in {'recruiter', 'super_admin', 'moderator'} and recruiter.email_verified and recruiter.is_active:
             return _email(recruiter.email)
     return None
 
@@ -113,6 +113,14 @@ async def queue_application_email(db, user, job, application, run) -> bool:
     payload = {
         'candidate_name': _text(user.name, 120), 'candidate_email': _email(user.email),
         'candidate_phone': _text(phone, 40), 'skills': [_text(s, 80) for s in (user.skills or [])[:100]],
+        'birth_date': str(getattr(user, 'birth_date', None) or ''),
+        'age': (datetime.now(timezone.utc).year - user.birth_date.year - ((datetime.now(timezone.utc).month, datetime.now(timezone.utc).day) < (user.birth_date.month, user.birth_date.day))) if getattr(user, 'birth_date', None) else None,
+        'candidate_city': _text(getattr(user, 'candidate_city', ''), 80),
+        'candidate_state': _text(getattr(user, 'candidate_state', ''), 2),
+        'seniority': _text(getattr(user, 'seniority', ''), 32),
+        'linkedin_url': _link(getattr(user, 'linkedin_url', '')),
+        'professional_summary': _text(getattr(user, 'professional_summary', ''), 4000),
+        'desired_salary': str(getattr(user, 'desired_salary', None) or ''),
         'job_title': _text(job.title, 160), 'company_name': _text(job.company, 160),
         'location': _text(job.location, 160), 'external_url': _job_link(job),
         'source_name': _text(job.source_name, 120), 'match_score': application.match_score,
@@ -172,6 +180,12 @@ def recruiter_message(recipient: str, payload: dict, resume: bytes) -> EmailMess
         f'Vaga: {payload.get("job_title", "")}', f'Empresa: {payload.get("company_name", "")}',
         f'Candidato: {payload.get("candidate_name", "")}', f'E-mail: {payload.get("candidate_email", "")}',
         f'Telefone: {payload.get("candidate_phone", "")}',
+        f'Data de nascimento: {payload.get("birth_date", "")} | Idade: {payload.get("age") or "Não informada"}',
+        f'Cidade/UF: {payload.get("candidate_city", "")} / {payload.get("candidate_state", "")}',
+        f'Senioridade: {payload.get("seniority", "")}',
+        f'LinkedIn: {payload.get("linkedin_url", "")}',
+        f'Pretensão salarial: {payload.get("desired_salary", "")}',
+        f'Resumo profissional: {payload.get("professional_summary", "")}',
         f'Competências declaradas: {", ".join(payload.get("skills", []))}',
         f'Compatibilidade calculada: {payload.get("match_score", 0)}%',
         'O currículo atual está anexado em PDF. Os dados foram compartilhados mediante autorização do candidato.',
@@ -291,7 +305,7 @@ async def process_application_outbox(batch_size: int = 50) -> dict:
                     run = await db.get(AutomationRun, item.run_id)
                     if not run or run.candidate_id != user.id or not run.consent_granted:
                         raise NotificationCancelled('Round authorization unavailable')
-                    if not user.email_verified or not user.automation_enabled or not has_premium_access(user):
+                    if not getattr(user, 'is_active', True) or not user.email_verified or not user.automation_enabled or not has_premium_access(user):
                         raise NotificationCancelled('Authorization no longer active')
                     recipient = _email(_open(item.recipient_encrypted))
                     payload = _open(item.payload_encrypted)

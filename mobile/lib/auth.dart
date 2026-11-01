@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'api.dart';
+import 'forms.dart';
 import 'ui.dart';
 import 'company.dart';
 
@@ -21,12 +22,34 @@ class _AuthScreenState extends State<AuthScreen> {
   final cnpj = TextEditingController(),
       company = TextEditingController(),
       contact = TextEditingController(),
-      phone = TextEditingController();
+      phone = TextEditingController(text: '+55 ');
+  final details = {
+    for (final key in [
+      'birth_date',
+      'cpf',
+      'seniority',
+      'linkedin_url',
+      'professional_summary',
+      'candidate_city',
+      'candidate_state',
+      'desired_salary'
+    ])
+      key: TextEditingController()
+  };
   bool register = false, consent = false, busy = false, obscure = true;
   String role = 'candidate';
   @override
   void dispose() {
-    for (final c in [email, password, name, cnpj, company, contact, phone]) {
+    for (final c in [
+      email,
+      password,
+      name,
+      cnpj,
+      company,
+      contact,
+      phone,
+      ...details.values
+    ]) {
       c.dispose();
     }
     super.dispose();
@@ -68,11 +91,15 @@ class _AuthScreenState extends State<AuthScreen> {
           'role': role,
           'privacy_version': '2026-01',
           'consent': true,
+          if (role == 'candidate') ...{
+            ...candidateDetailsPayload(details),
+            'phone': brazilPhonePayload(phone.text)
+          },
           if (role == 'recruiter') ...{
             'company_cnpj': normalizeCnpj(cnpj.text),
             'company_name': company.text.trim(),
             'company_contact_email': contact.text.trim(),
-            'company_phone': phone.text.trim()
+            'company_phone': brazilPhonePayload(phone.text)
           },
         });
         if (!mounted) return;
@@ -126,6 +153,8 @@ class _AuthScreenState extends State<AuthScreen> {
           padding: const EdgeInsets.only(bottom: 16),
           child: TextFormField(
             controller: controller,
+            inputFormatters:
+                controller == phone ? [BrazilPhoneFormatter()] : null,
             enabled: !busy,
             onChanged: controller == email ? (_) => setState(() {}) : null,
             keyboardType: type,
@@ -162,20 +191,19 @@ class _AuthScreenState extends State<AuthScreen> {
                                   children: [
                                     const VagouBrandMark(size: 52),
                                     const SizedBox(height: 24),
-                                    const ExecutiveHero(
-                                        title:
-                                            'IA de Recrutamento & Automação de Carreira',
-                                        subtitle:
-                                            'Conecte competências a oportunidades. Uma plataforma para sua próxima decisão profissional.',
-                                        eyebrow:
-                                            'BEM-VINDO AO SEU PRÓXIMO PASSO'),
+                                    const Text(
+                                        'IA de Recrutamento & Automação de Carreira',
+                                        style: TextStyle(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w700)),
+                                    const SizedBox(height: 16),
                                     Text(
                                         register
                                             ? 'Um novo começo\npassa por aqui.'
                                             : 'Bom ter você\nde volta.',
                                         style: Theme.of(context)
                                             .textTheme
-                                            .headlineLarge
+                                            .titleLarge
                                             ?.copyWith(
                                                 fontWeight: FontWeight.w900,
                                                 height: 1.15)),
@@ -205,21 +233,23 @@ class _AuthScreenState extends State<AuthScreen> {
                                                     ),
                                                     (
                                                       'recruiter',
-                                                      'Sou Recrutador / Empresa',
+                                                      'Sou Recrutador',
                                                       Icons.business_outlined
                                                     )
                                                   ])
                                                     SizedBox(
-                                                        width: constraints
-                                                            .maxWidth,
+                                                        width: (constraints
+                                                                    .maxWidth -
+                                                                8) /
+                                                            2,
                                                         child: ChoiceChip(
                                                             selected:
                                                                 role == item.$1,
                                                             avatar: Icon(
                                                                 item.$3,
                                                                 size: 18),
-                                                            label:
-                                                                Text(item.$2),
+                                                            label: Text(item.$2,
+                                                                maxLines: 2),
                                                             onSelected: busy
                                                                 ? null
                                                                 : (_) => setState(
@@ -269,9 +299,29 @@ class _AuthScreenState extends State<AuthScreen> {
                                           type: TextInputType.phone,
                                           validator: (v) => RegExp(
                                                       r'^\+55\d{10,11}$')
-                                                  .hasMatch(v ?? '')
+                                                  .hasMatch(brazilPhonePayload(
+                                                          v ?? '') ??
+                                                      '')
                                               ? null
                                               : 'Use +55 seguido de DDD e número.'),
+                                    ],
+                                    if (register && role == 'candidate') ...[
+                                      field(phone, 'Telefone com DDD',
+                                          Icons.phone_outlined,
+                                          type: TextInputType.phone,
+                                          validator: (v) => brazilPhonePayload(
+                                                          v ?? '') ==
+                                                      null ||
+                                                  RegExp(r'^\+55\d{10,11}$')
+                                                      .hasMatch(
+                                                          brazilPhonePayload(
+                                                                  v ?? '') ??
+                                                              '')
+                                              ? null
+                                              : 'Confira o DDD e o telefone.'),
+                                      CandidateDetailsFields(
+                                          controllers: details, enabled: !busy),
+                                      const SizedBox(height: 16),
                                     ],
                                     if (register)
                                       Row(

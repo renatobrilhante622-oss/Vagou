@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, UploadFile
 from fastapi.responses import StreamingResponse
 from pypdf import PdfReader
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -31,11 +31,15 @@ DB = Depends(session)
 
 def account_view(user):
     return {'id': user.id, 'email': user.email, 'name': user.name, 'role': user.role, 'skills': user.skills,
-            'is_premium': has_premium_access(user), 'automation_enabled': user.automation_enabled,
+            'is_premium': has_premium_access(user), 'is_admin': user.is_admin, 'is_active': user.is_active, 'automation_enabled': user.automation_enabled,
             'has_resume': bool(user.resume_key), 'preferences': user.preferences or {},
             'phone': cipher().decrypt(user.phone_encrypted.encode()).decode() if user.phone_encrypted else None,
             'email_verified': user.email_verified, 'company_cnpj': user.company_cnpj,
             'company_name': user.company_name, 'company_contact_email': user.company_contact_email,
+            'company_verified':user.company_verified,'birth_date':user.birth_date,'seniority':user.seniority,
+            'linkedin_url':user.linkedin_url,'professional_summary':user.professional_summary,
+            'candidate_city':user.candidate_city,'candidate_state':user.candidate_state,'desired_salary':user.desired_salary,
+            'cpf':cipher().decrypt(user.cpf_encrypted.encode()).decode() if user.cpf_encrypted else None,
             'profile_completion': round(100 * sum([bool(user.name), bool(user.skills),
                 bool(user.phone_encrypted), bool(user.resume_key), bool((user.preferences or {}).get('titles'))]) / 5)}
 
@@ -57,6 +61,12 @@ async def profile(payload: ProfileUpdate, user: User = Candidate, db: AsyncSessi
     user.name = payload.name
     user.skills = payload.skills
     user.phone_encrypted = cipher().encrypt(payload.phone.encode()).decode() if payload.phone else None
+    for key in ('birth_date','seniority','linkedin_url','professional_summary','candidate_city','candidate_state','desired_salary'):
+        if key in payload.model_fields_set: setattr(user,key,getattr(payload,key))
+    if 'cpf' in payload.model_fields_set:
+        user.cpf_encrypted=cipher().encrypt(payload.cpf.encode()).decode() if payload.cpf else None
+    if payload.desired_salary is not None:
+        user.preferences={**(user.preferences or {}),'min_salary':payload.desired_salary}
     await db.commit()
     return account_view(user)
 
@@ -172,12 +182,19 @@ async def download_resume(user: User = Candidate):
 
 @router.post('/jobs', response_model=JobOut, status_code=201)
 async def create_job(payload: JobCreate, user: User = Recruiter, db: AsyncSession = DB):
-    job = Job(**payload.model_dump(), recruiter_id=user.id, moderation_status='pending')
+    job = Job(**payload.model_dump(), recruiter_id=user.id, moderation_status='approved' if user.company_verified else 'pending')
     if not is_brazilian_job(job):
         raise HTTPException(422, 'Informe uma Cidade/UF brasileira ou a abrangência Remoto Brasil para esta vaga.')
     geography = job_location_details(job)
     job.city, job.state, job.country = geography['city'], geography['state'], 'BR'
     db.add(job)
+    await db.flush()
+    if user.company_verified:
+        from app.admin import audit
+        job.moderated_by = user.id
+        job.moderated_at = datetime.now(timezone.utc)
+        job.moderation_note = 'Aprovação automática: empresa verificada.'
+        audit(db, user, 'verified_company_job_approved', 'job', job.id)
     await db.commit()
     await db.refresh(job)
     return job
@@ -197,6 +214,8 @@ async def jobs(offset: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=100
     except Exception as error:
         logger.error('public_job_sync_failed error_type=%s', type(error).__name__)
     rows = (await db.scalars(select(Job).where(Job.active.is_(True), Job.moderation_status == 'approved').order_by(Job.created_at.desc(), Job.id).offset(offset).limit(limit))).all()
+    verified_ids=set((await db.scalars(select(User.id).where(User.company_verified.is_(True)))).all())
+    for job in rows: job._company_verified=job.recruiter_id in verified_ids
     return [job for job in rows if is_brazilian_job(job) and compatible_region(job, preferences)
             and (not title or title_matches(job.title, title))]
 
@@ -272,6 +291,8 @@ async def manual_apply(job_id: uuid.UUID, user: User = Candidate, db: AsyncSessi
     job = await db.scalar(select(Job).where(Job.id == job_id, Job.active.is_(True), Job.moderation_status == 'approved').with_for_update())
     if not job or not is_brazilian_job(job):
         raise HTTPException(404, 'Job not found')
+    if not user.resume_key:
+        raise HTTPException(409, 'Envie seu currículo PDF no Perfil antes de se candidatar.')
     if job.recruiter_id is None:
         if not job.source_url:
             raise HTTPException(409, 'Esta vaga ainda não possui um canal oficial de candidatura.')
@@ -287,7 +308,7 @@ async def manual_apply(job_id: uuid.UUID, user: User = Candidate, db: AsyncSessi
 @router.get('/applications')
 async def applications(offset: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=100), user: User = Depends(current_user), db: AsyncSession = DB):
     query = select(Application, Job, User.name).select_from(Application).join(Job, Job.id == Application.job_id).join(User, User.id == Application.candidate_id)
-    query = query.where(Application.candidate_id == user.id) if user.role == 'candidate' else query.where(Job.recruiter_id == user.id)
+    query = query.where(Application.candidate_id == user.id) if user.role in {'candidate','super_admin','moderator'} else query.where(Job.recruiter_id == user.id)
     rows = (await db.execute(query.order_by(Application.created_at.desc(), Application.id).offset(offset).limit(limit))).all()
     return [{'id': a.id, 'job_id': j.id, 'job_title': j.title, 'candidate_id': a.candidate_id,
              'source': a.source, 'status': a.status, 'match_score': a.match_score, 'created_at': a.created_at, 'status_updated_at': a.status_updated_at,
@@ -361,7 +382,11 @@ async def recruiter_applicants(
                     'id': application.id, 'candidate_name': candidate.name,
                     'candidate_email': candidate.email,
                     'candidate_phone': cipher().decrypt(candidate.phone_encrypted.encode()).decode() if candidate.phone_encrypted else None,
-                    'candidate_skills': candidate.skills or [],
+                    'candidate_skills': candidate.skills or [], 'candidate_birth_date':candidate.birth_date,
+                    'candidate_age': (datetime.now(timezone.utc).year - candidate.birth_date.year - ((datetime.now(timezone.utc).month, datetime.now(timezone.utc).day) < (candidate.birth_date.month, candidate.birth_date.day))) if candidate.birth_date else None,
+                    'candidate_city':candidate.candidate_city,'candidate_state':candidate.candidate_state,
+                    'candidate_seniority':candidate.seniority,'candidate_linkedin':candidate.linkedin_url,
+                    'candidate_summary':candidate.professional_summary,
                     'job_id': job.id, 'job_title': job.title, 'status': application.status,
                     'match_score': application.match_score, 'created_at': application.created_at,
                     'preferred_locations': places, 'salary_expectation': prefs.get('min_salary'),
@@ -437,3 +462,21 @@ async def dashboard(user: User = Candidate, db: AsyncSession = DB):
 @router.get('/courses')
 async def courses(skill: str | None = Query(None, max_length=80)):
     return [c for c in COURSES if skill is None or normalize(skill) in {normalize(x) for x in c['skills']}]
+
+
+@router.get('/internal-jobs')
+async def internal_jobs(offset: int=Query(0,ge=0),limit: int=Query(20,ge=1,le=100),user: User=Candidate,db: AsyncSession=DB):
+    rows=(await db.scalars(select(Job).where(Job.active.is_(True),Job.moderation_status=='approved',Job.recruiter_id.is_not(None),or_(Job.expires_at.is_(None),Job.expires_at > datetime.now(timezone.utc))).order_by(Job.featured.desc(),Job.created_at.desc(),Job.id).offset(offset).limit(limit))).all()
+    owners={owner.id:owner.company_verified for owner in (await db.scalars(select(User).where(User.id.in_([job.recruiter_id for job in rows])))).all()} if rows else {}
+    items=[]
+    for job in rows:
+        if not is_brazilian_job(job): continue
+        job._company_verified=owners.get(job.recruiter_id,False)
+        items.append({'job':PublicJobOut.model_validate(job).model_dump(mode='json'),'category':'internal','match_score':None,'match_reasons':[]})
+    return {'items':items,'next_offset':offset+len(rows) if len(rows)==limit else None}
+
+
+@router.get('/radar')
+async def radar(offset: int=Query(0,ge=0),limit: int=Query(20,ge=1,le=100),user: User=Candidate,db: AsyncSession=DB):
+    if not has_premium_access(user): raise HTTPException(403,'O Radar de Vagas é exclusivo PRO.')
+    return await matches(offset,limit,user,db)
