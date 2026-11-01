@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Integer, JSON, String, Text, Uuid, func
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -47,4 +47,12 @@ class AutomationEvent(Base):
     match_score: Mapped[int | None] = mapped_column(Integer)
     match_reasons: Mapped[list | None] = mapped_column(JSON)
     destination_channel: Mapped[str | None] = mapped_column(String(32))
+    description: Mapped[str | None] = mapped_column(Text)
+    contact_email: Mapped[str | None] = mapped_column(String(254))
+    city: Mapped[str | None] = mapped_column(String(80))
+    state: Mapped[str | None] = mapped_column(String(2))
+    modality: Mapped[str | None] = mapped_column(String(16))
+    contract_type: Mapped[str | None] = mapped_column(String(16))
+    salary_min: Mapped[float | None] = mapped_column(Numeric(12, 2))
+    salary_max: Mapped[float | None] = mapped_column(Numeric(12, 2))
     __table_args__ = (CheckConstraint("status IN ('submitted','already_applied','requires_manual','possible_match','missing_resume','filtered','failed','limit_reached','search_channel')", name='ck_automation_event_status'),)

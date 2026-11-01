@@ -3,6 +3,7 @@ import asyncio
 from datetime import datetime, timezone
 from typing import Literal
 from uuid import UUID
+from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -10,7 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.automation_models import AutomationEvent, AutomationRun
 from app.db import session
-from app.models import Application, User
+from app.models import Application, Job, User
+from app.job_catalog import unique_reasons
+from app.matching import is_brazilian_job, job_location_details
 from app.premium import has_premium_access
 from app.schemas import AutomationEventsReport, AutomationRunRequest, AutomationRunStatusReport, AutomationRunsReport
 from app.security import role
@@ -23,12 +26,20 @@ def premium(user: User):
         raise HTTPException(403, 'Esta funcionalidade exige uma assinatura Premium.')
 
 
-def event_view(event, application=None):
-    return {'id': event.id, 'job_id': event.job_id, 'job_title': event.job_title,
+def event_view(event, application=None, job=None):
+    facts = {key: getattr(event, key, None) if getattr(event, key, None) is not None else getattr(job, key, None)
+             for key in ('description', 'contact_email', 'city', 'state', 'modality', 'contract_type', 'salary_min', 'salary_max')}
+    if job is not None:
+        facts['description'] = job.description
+        facts['contact_email'] = job.contact_email
+    geography = job_location_details(SimpleNamespace(location=event.location or getattr(job, 'location', ''),
+        country=getattr(job, 'country', None), **{key: facts[key] for key in ('city', 'state', 'modality')}))
+    facts.update(city=geography['city'], state=geography['state'], recruiter_email=facts['contact_email'])
+    return {**facts, 'id': event.id, 'job_id': event.job_id, 'job_title': event.job_title,
             'job_url': event.job_url, 'status': event.status, 'detail': event.detail,
             'created_at': event.created_at, 'company': event.company, 'location': event.location,
             'source_name': event.source_name, 'match_score': event.match_score,
-            'match_reasons': event.match_reasons or [], 'external_url': event.job_url,
+            'match_reasons': unique_reasons(event.match_reasons), 'external_url': event.job_url,
             'company_name': event.company, 'destination_channel': event.destination_channel,
             'delivery_status': application.delivery_status if application else None}
 
@@ -66,7 +77,20 @@ async def report_events(run_id: UUID, offset: int = Query(0, ge=0), limit: int =
     applications = (await db.scalars(select(Application).where(
         Application.candidate_id == user.id, Application.job_id.in_(job_ids)))).all() if job_ids else []
     by_job = {application.job_id: application for application in applications}
-    return {'run': run_view(run), 'items': [event_view(event, by_job.get(event.job_id)) for event in events],
+    jobs = (await db.scalars(select(Job).where(Job.id.in_(job_ids)))).all() if job_ids else []
+    vacancies = {job.id: job for job in jobs}
+    items = []
+    for event in events:
+        job = vacancies.get(event.job_id)
+        # Hide legacy foreign vacancy cards while retaining their immutable
+        # audit rows and the original execution totals in the database.
+        if event.job_id or event.job_title and event.status != 'search_channel':
+            geography = job or SimpleNamespace(location=event.location, city=getattr(event, 'city', None),
+                state=getattr(event, 'state', None), modality=getattr(event, 'modality', None), country=None)
+            if not is_brazilian_job(geography):
+                continue
+        items.append(event_view(event, by_job.get(event.job_id), job))
+    return {'run': run_view(run), 'items': items,
             'next_offset': offset + len(events) if len(events) == limit else None}
 
 

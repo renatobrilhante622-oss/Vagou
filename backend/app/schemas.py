@@ -185,6 +185,15 @@ class AutomationEventReport(StrictModel):
     company_name: str | None = None
     destination_channel: str | None = None
     delivery_status: str | None = None
+    description: str | None = None
+    contact_email: EmailStr | None = None
+    recruiter_email: EmailStr | None = None
+    city: str | None = None
+    state: str | None = None
+    modality: Modality | None = None
+    contract_type: ContractType | None = None
+    salary_min: float | None = None
+    salary_max: float | None = None
 
 
 class AutomationEventsReport(StrictModel):
@@ -203,7 +212,35 @@ class JobCreate(StrictModel):
     modality: Modality
     contract_type: ContractType | None = None
     location: str = Field(min_length=2, max_length=160)
+    city: str | None = Field(default=None, min_length=2, max_length=80)
+    state: str | None = None
+    country: str | None = None
     keywords: list[str] = Field(min_length=1, max_length=100)
+
+    @field_validator('city', 'state', 'country', mode='before')
+    @classmethod
+    def empty_location_details(cls, value):
+        return None if value is None or value == '' else value
+
+    @field_validator('state')
+    @classmethod
+    def valid_state(cls, value):
+        if value is None:
+            return None
+        from app.job_sources import state_code
+        normalized = state_code(value)
+        if not normalized:
+            raise ValueError('Informe uma UF brasileira válida, como DF, GO ou SP.')
+        return normalized
+
+    @field_validator('country')
+    @classmethod
+    def valid_country(cls, value):
+        if value is None:
+            return None
+        if value.strip().upper() != 'BR':
+            raise ValueError('As vagas devem estar localizadas no Brasil (BR).')
+        return 'BR'
 
     @field_validator('keywords')
     @classmethod
@@ -219,12 +256,27 @@ class JobCreate(StrictModel):
 
 class PublicJobOut(JobCreate):
     model_config = ConfigDict(from_attributes=True)
+    # Public publishers may omit structured skills. Keep that absence honest;
+    # recruiter-created vacancies still require at least one declared skill.
+    keywords: list[str] = Field(default_factory=list, max_length=100)
     id: UUID
     active: bool
     created_at: datetime
     moderation_status: Literal['pending', 'approved', 'rejected'] = 'pending'
     source_url: str | None = None
     source_name: str = 'Vagou!'
+    company_name: str | None = None
+    external_url: str | None = None
+    recruiter_email: EmailStr | None = None
+    modality_label: str | None = None
+
+    @field_validator('country')
+    @classmethod
+    def valid_country(cls, value):
+        # Writes are Brazil-only. Private moderation/recruiter views must still
+        # serialize archived legacy rows without breaking their audit history.
+        from app.job_sources import country_code
+        return country_code(value)
 
 
 class JobOut(PublicJobOut):

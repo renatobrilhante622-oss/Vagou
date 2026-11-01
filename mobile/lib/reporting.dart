@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'api.dart';
+import 'opportunity_details.dart';
 import 'ui.dart';
 
 class ReportsView extends StatefulWidget {
@@ -25,12 +26,18 @@ class _ReportsViewState extends State<ReportsView> {
     report['notifications'] = notifications;
     dynamic runs;
     final possibleMatches = <dynamic>[];
+    final seenPossible = <String>{};
     try {
       runs = await widget.api.request('GET', '/automation/runs?limit=10');
       for (final run in (runs['items'] as List).take(5)) {
         final response = await widget.api.request('GET',
             '/automation/runs/${run['id']}/events?status=possible_match&limit=10');
-        possibleMatches.addAll(response['items'] as List);
+        for (final item in response['items'] as List) {
+          final row = item as Map;
+          final key = opportunityValue(row, const ['job_id', 'external_url', 'job_url'],
+              '${row['job_title']}|${row['company_name'] ?? row['company']}|${row['location']}');
+          if (seenPossible.add(key)) possibleMatches.add(item);
+        }
       }
     }
     on ApiException catch (error) { if (error.status != 403 && error.status != 404) { report['automation_unavailable'] = true; } }
@@ -53,17 +60,17 @@ class _ReportsViewState extends State<ReportsView> {
     finally { if (mounted) setState(() => _loadingMore = false); }
   }
   Future<void> _job(Map row) async {
-    final link = (row['job_url'] ?? row['source_url'])?.toString();
+    final link = (row['external_url'] ?? row['job_url'] ?? row['source_url'])?.toString();
     final uri = link == null ? null : Uri.tryParse(link);
     if (uri != null && ['http', 'https'].contains(uri.scheme)) {
-      try { await externalLink('${row['job_url'] ?? row['source_url']}'); }
+      try { await externalLink(link!); }
       catch (error) { if (mounted) friendlyError(context, error); }
       return;
     }
     try {
       final job = await widget.api.request('GET', '/jobs/${row['job_id']}');
       if (!mounted) return;
-      await showModalBottomSheet<void>(context: context, showDragHandle: true, isScrollControlled: true, builder: (context) => SafeArea(child: SingleChildScrollView(padding: const EdgeInsets.all(24), child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [Text('${job['title']}', style: Theme.of(context).textTheme.headlineSmall), const SizedBox(height: 8), Text('${job['company']} • ${job['location']}'), const SizedBox(height: 20), Text('${job['description']}')]))));
+      await showModalBottomSheet<void>(context: context, showDragHandle: true, isScrollControlled: true, builder: (context) => SafeArea(child: SingleChildScrollView(padding: const EdgeInsets.all(24), child: OpportunityDetails(row: Map<String, dynamic>.from(job as Map), initiallyExpanded: true))));
     } catch (error) { if (mounted) friendlyError(context, error); }
   }
   Future<void> _events(Map run) async {
@@ -83,7 +90,7 @@ class _ReportsViewState extends State<ReportsView> {
     final total = (data['total_applications'] as num? ?? 0).toInt();
     final statuses = Map<String, dynamic>.from(data['by_status'] as Map? ?? {});
     final metrics = [
-      ('Enviadas', '$total', Icons.send_outlined),
+      ('Registradas', '$total', Icons.send_outlined),
       ('Manuais', '${manual.toInt()}', Icons.touch_app_outlined),
       ('Automáticas', '${automatic.toInt()}', Icons.bolt_outlined),
       ('Em observação', '${data['observation_jobs'] ?? 0}', Icons.visibility_outlined),
@@ -103,24 +110,27 @@ class _ReportsViewState extends State<ReportsView> {
         ]))])),
       const SectionTitle(title: 'Histórico de candidaturas', subtitle: 'Status, data e acesso à oportunidade em um só lugar.'),
       if (_applications.isEmpty) const Panel(child: Text('Suas candidaturas aparecerão aqui. Explore as vagas e encontre seu próximo passo.')),
-      for (final row in _applications) Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Row(children: [Expanded(child: Text('${row['job_title']}', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800))), Icon(row['source'] == 'automatic' ? Icons.bolt : Icons.touch_app_outlined, color: Brand.teal)]), const SizedBox(height: 10), Wrap(spacing: 8, runSpacing: 6, children: [Chip(label: Text(statusLabel('${row['status']}')), visualDensity: VisualDensity.compact), Chip(label: Text('${row['match_score']}% de compatibilidade'), visualDensity: VisualDensity.compact)]), const SizedBox(height: 6), Text(formatDate(row['created_at']), style: Theme.of(context).textTheme.bodySmall), TextButton.icon(onPressed: () => _job(row as Map), icon: const Icon(Icons.arrow_forward), label: const Text('Ver oportunidade'))])),
+      for (final row in _applications) Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [Expanded(child: Text('${row['job_title']}', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800))), Icon(row['source'] == 'automatic' ? Icons.bolt : Icons.touch_app_outlined, color: Brand.teal)]),
+        Text('${row['company_name'] ?? row['company'] ?? 'Empresa não informada'} · ${opportunityLocation(row as Map)}'),
+        OpportunityDetails(row: row, showHeader: false),
+        const SizedBox(height: 6), Text(formatDate(row['created_at']), style: Theme.of(context).textTheme.bodySmall),
+        if (opportunityValue(row, const ['external_url', 'job_url', 'source_url']).isEmpty || opportunityValue(row, const ['external_url', 'job_url', 'source_url']).startsWith('/')) TextButton.icon(onPressed: () => _job(row), icon: const Icon(Icons.arrow_forward), label: const Text('Ver oportunidade')),
+      ])),
       if (_hasMore) OutlinedButton(onPressed: _loadingMore ? null : _more, child: Text(_loadingMore ? 'Carregando...' : 'Ver candidaturas anteriores')),
       const SizedBox(height: 16), const SectionTitle(title: 'Relatórios de automação', subtitle: 'Transparência sobre cada busca e seus resultados.'),
       if (data['automation_unavailable'] == true) const Panel(child: Text('Os detalhes de automação estão temporariamente indisponíveis. Suas candidaturas continuam disponíveis acima.')),
       const SectionTitle(title: 'Possíveis Matches (Próximas ao seu perfil)'),
       if ((data['possible_matches'] as List? ?? []).isEmpty) const Panel(child: Text('Nenhuma vaga próxima ao seu perfil nas últimas varreduras.')),
       for (final event in (data['possible_matches'] as List? ?? [])) Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('${event['job_title'] ?? 'Oportunidade'}', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
-        Text('${event['company'] ?? 'Empresa não informada'} · ${event['location'] ?? 'Localização não informada'}'),
-        Wrap(spacing: 8, children: [Chip(label: Text('${event['match_score'] ?? 0}% de compatibilidade')), Chip(label: Text('${event['source_name'] ?? 'Fonte autorizada'}'))]),
-        Text((event['match_reasons'] as List? ?? const []).join(' · ')),
-        TextButton.icon(onPressed: () => _job(event as Map), icon: const Icon(Icons.open_in_new), label: const Text('Candidatar-se / Abrir Vaga')),
+        OpportunityDetails(row: event as Map),
+        if (opportunityValue(event, const ['external_url', 'job_url']).isEmpty || opportunityValue(event, const ['external_url', 'job_url']).startsWith('/')) TextButton.icon(onPressed: () => _job(event), icon: const Icon(Icons.open_in_new), label: const Text('Candidatar-se / Abrir Vaga')),
       ])),
       if ((data['runs'] as List).isEmpty) const Panel(child: Text('Os ciclos de busca Premium aparecerão aqui após a automação ser autorizada nas suas preferências.')),
-      for (final run in data['runs']) Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Row(children: [const Icon(Icons.radar, color: Brand.teal), const SizedBox(width: 10), Expanded(child: Text(statusLabel('${run['status']}'), style: const TextStyle(fontWeight: FontWeight.w800))), Text('${run['submitted_applications'] ?? 0} envios')]), const SizedBox(height: 10), Text(formatDate(run['started_at'])), const SizedBox(height: 6), Text('${run['collected_jobs'] ?? 0} coletadas · ${run['scanned_jobs'] ?? 0} analisadas (${run['external_jobs_scanned'] ?? 0} externas) · ${run['possible_match_jobs'] ?? 0} possíveis · ${run['filtered_jobs'] ?? 0} descartadas · ${run['manual_review_jobs'] ?? 0} para revisão'), if ((run['omitted_events'] as num? ?? 0) > 0) Text('Há ${run['omitted_events']} eventos adicionais resumidos neste ciclo.'), TextButton.icon(onPressed: () => _events(run as Map), icon: const Icon(Icons.receipt_long_outlined), label: const Text('Ver detalhes do ciclo'))])),
+      for (final run in data['runs']) Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Row(children: [const Icon(Icons.radar, color: Brand.teal), const SizedBox(width: 10), Expanded(child: Text(statusLabel('${run['status']}'), style: const TextStyle(fontWeight: FontWeight.w800))), Text('${run['submitted_applications'] ?? 0} registros')]), const SizedBox(height: 10), Text(formatDate(run['started_at'])), const SizedBox(height: 6), Text('${run['collected_jobs'] ?? 0} coletadas · ${run['scanned_jobs'] ?? 0} analisadas (${run['external_jobs_scanned'] ?? 0} externas) · ${run['possible_match_jobs'] ?? 0} possíveis · ${run['filtered_jobs'] ?? 0} descartadas · ${run['manual_review_jobs'] ?? 0} para revisão'), if ((run['omitted_events'] as num? ?? 0) > 0) Text('Há ${run['omitted_events']} eventos adicionais resumidos neste ciclo.'), TextButton.icon(onPressed: () => _events(run as Map), icon: const Icon(Icons.receipt_long_outlined), label: const Text('Ver detalhes do ciclo'))])),
     ]));
   });
-  Widget _legend(String label, Color color) => Row(children: [Container(width: 10, height: 10, decoration: BoxDecoration(color: color, shape: BoxShape.circle)), const SizedBox(width: 8), Text(label)]);
+  Widget _legend(String label, Color color) => Row(children: [Container(width: 10, height: 10, decoration: BoxDecoration(color: color, shape: BoxShape.circle)), const SizedBox(width: 8), Expanded(child: Text(label))]);
 }
 
 class _DistributionPainter extends CustomPainter {
@@ -169,7 +179,11 @@ class _RunEventsState extends State<_RunEvents> {
     const SectionTitle(title: 'Detalhes da busca'),
     if (((widget.initial['run'] as Map?)?['omitted_events'] as num? ?? 0) > 0) const Padding(padding: EdgeInsets.only(bottom: 16), child: Text('Este ciclo contém muitos resultados. O histórico detalhado é limitado; os totais completos aparecem no resumo.')),
     if (_events.isEmpty) const Text('Não há eventos de candidatura neste ciclo.'),
-    for (final event in _events) Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('${event['job_title'] ?? 'Oportunidade'}', style: Theme.of(context).textTheme.titleMedium), const SizedBox(height: 8), Text('${event['company'] ?? 'Empresa não informada'} · ${event['location'] ?? 'Localização não informada'}'), Wrap(spacing: 8, children: [Chip(label: Text(statusLabel('${event['status']}'))), if (event['match_score'] != null) Chip(label: Text('${event['match_score']}%')), Chip(label: Text('${event['source_name'] ?? 'Vagou!'}'))]), if ((event['match_reasons'] as List? ?? const []).isNotEmpty) Text((event['match_reasons'] as List).join(' · ')), Text('${event['detail'] ?? ''}'), Text(formatDate(event['created_at']), style: Theme.of(context).textTheme.bodySmall), if (event['job_url'] != null || event['job_id'] != null) TextButton.icon(onPressed: () => widget.onJob(event as Map), icon: const Icon(Icons.open_in_new), label: const Text('Candidatar-se / Abrir Vaga'))])),
+    for (final event in _events) Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      OpportunityDetails(row: event as Map),
+      Text(formatDate(event['created_at']), style: Theme.of(context).textTheme.bodySmall),
+      if ((event['job_id'] != null || event['job_url'] != null) && (opportunityValue(event, const ['external_url', 'job_url']).isEmpty || opportunityValue(event, const ['external_url', 'job_url']).startsWith('/'))) TextButton.icon(onPressed: () => widget.onJob(event), icon: const Icon(Icons.open_in_new), label: const Text('Candidatar-se / Abrir Vaga')),
+    ])),
     if (_next != null) OutlinedButton(onPressed: _busy ? null : _more, child: Text(_busy ? 'Carregando...' : 'Mais eventos')),
   ]));
 }

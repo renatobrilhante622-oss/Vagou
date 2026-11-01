@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'api.dart';
 import 'automation_panel.dart';
+import 'opportunity_details.dart';
 import 'preferences.dart';
 import 'ui.dart';
 
@@ -73,7 +74,7 @@ class _JobsViewState extends State<JobsView> {
       final result = await widget.api.request('POST', '/jobs/$id/applications');
       if (!mounted) return;
       if (result['status'] == 'requires_manual') {
-        final link = result['source_url'] ?? result['job_url'] ?? job['source_url'];
+        final link = result['external_url'] ?? result['source_url'] ?? result['job_url'] ?? job['source_url'];
         if (link is String && link.isNotEmpty) { await externalLink(link); }
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Esta vaga exige candidatura no site oficial. Nenhum envio automático foi registrado.')));
@@ -88,8 +89,7 @@ class _JobsViewState extends State<JobsView> {
     final job = Map<String, dynamic>.from(item['job']);
     await showModalBottomSheet<void>(context: context, isScrollControlled: true, showDragHandle: true, builder: (context) => SafeArea(child: DraggableScrollableSheet(expand: false, initialChildSize: .78, maxChildSize: .95, minChildSize: .4, builder: (context, controller) => ListView(controller: controller, padding: const EdgeInsets.all(24), children: [
       SectionTitle(title: job['title'], subtitle: '${job['company']} · ${job['location']}'),
-      Wrap(spacing: 8, runSpacing: 8, children: [Chip(label: Text('${item['match_score']}% de compatibilidade'), avatar: const Icon(Icons.auto_awesome, size: 18)), Chip(label: Text(modalityLabel(job['modality'])))]),
-      const SizedBox(height: 20), Text(job['description'] ?? '', style: Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.6)),
+      OpportunityDetails(row: {...job, 'match_score': item['match_score'], 'match_reasons': item['match_reasons']}, showHeader: false, initiallyExpanded: true),
       const SizedBox(height: 24), Text('Competências da oportunidade', style: Theme.of(context).textTheme.titleMedium),
       const SizedBox(height: 10), Wrap(spacing: 8, children: [for (final skill in job['keywords'] ?? []) Chip(label: Text('$skill'))]),
       if ((item['missing_skills'] as List? ?? []).isNotEmpty) ...[const SizedBox(height: 18), Text('O que pode fortalecer seu perfil', style: Theme.of(context).textTheme.titleMedium), const SizedBox(height: 8), Text((item['missing_skills'] as List).join(' · ')), const SizedBox(height: 8), const Text('Visite a aba Cursos para encontrar trilhas relacionadas. A decisão de se candidatar é sua.')],
@@ -108,14 +108,21 @@ class _JobsViewState extends State<JobsView> {
       ]),
       const SizedBox(height: 12),
       const SectionTitle(title: 'Seu próximo capítulo', subtitle: 'Oportunidades alinhadas às competências e aos critérios do seu perfil.'),
-      SegmentedButton<String>(segments: const [ButtonSegment(value: 'high', label: Text('Match alto'), icon: Icon(Icons.bolt)), ButtonSegment(value: 'observation', label: Text('Possíveis vagas'), icon: Icon(Icons.travel_explore))], selected: {category}, onSelectionChanged: (v) => setState(() => category = v.first)),
+      LayoutBuilder(builder: (context, constraints) => SingleChildScrollView(scrollDirection: Axis.horizontal, child: SizedBox(width: constraints.maxWidth < 340 ? 340 : constraints.maxWidth, child: SegmentedButton<String>(segments: const [ButtonSegment(value: 'high', label: Text('Match alto'), icon: Icon(Icons.bolt)), ButtonSegment(value: 'observation', label: Text('Possíveis vagas'), icon: Icon(Icons.travel_explore))], selected: {category}, onSelectionChanged: (v) => setState(() => category = v.first))))),
       const SizedBox(height: 18),
       if (category == 'observation') const Padding(padding: EdgeInsets.only(bottom: 16), child: Text('Vagas próximas do seu perfil, com 40% a 69% de compatibilidade. Conheça as lacunas e decida se faz sentido se candidatar.')),
-      if ((collectorStatus['failed_sources'] as num? ?? 0) > 0) Panel(child: Row(children: [const Icon(Icons.sync_problem_outlined, color: Brand.coral), const SizedBox(width: 10), Expanded(child: Text('${collectorStatus['failed_sources']} fonte(s) externa(s) não responderam. As demais fontes e vagas disponíveis foram mantidas.'))])),
-      if (visible.isEmpty && collectorStatus['configured'] == false) const Panel(child: Text('Configure um cargo ou palavras-chave nas preferências para consultar a Gupy; feeds extras dependem de fontes públicas autorizadas.')),
+      if (visible.isEmpty && collectorStatus['configured'] == false) const Panel(child: Text('Configure cargo, Cidade/UF e palavras-chave nas preferências para consultar oportunidades brasileiras.')),
       if (visible.isEmpty && collectorStatus['configured'] == true && (collectorStatus['failed_sources'] as num? ?? 0) == 0) const Panel(child: Text('As fontes consultadas não retornaram vagas aprovadas compatíveis agora. Tente novamente mais tarde ou ajuste os filtros.')),
       if (visible.isEmpty) const Panel(child: EmptyState(icon: Icons.manage_search, title: 'Vamos explorar novas possibilidades?', message: 'Nenhuma vaga desta página se encaixa nesta categoria. Confira seus critérios no perfil ou carregue mais oportunidades.')),
       for (final item in visible) _jobCard(item),
+      if ((collectorStatus['search_channels'] as List? ?? const []).isNotEmpty) ...[
+        const SectionTitle(title: 'Explorar portais brasileiros', subtitle: 'Buscas com seus critérios; os resultados são conferidos no portal e não contam como vagas analisadas.'),
+        for (final channel in (collectorStatus['search_channels'] as List)) Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('${channel['source_name'] ?? 'Portal brasileiro'}', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+          Text('${channel['query'] ?? 'Vagas'} · ${channel['location'] ?? 'Brasil'}'),
+          OpportunityDetails(row: {...Map<String, dynamic>.from(channel as Map), 'status': 'search_channel'}, showHeader: false, showReasons: false),
+        ])),
+      ],
       if (error != null) OutlinedButton.icon(onPressed: () => load(more: true), icon: const Icon(Icons.refresh), label: const Text('Tentar carregar novamente')),
       if (next != null) OutlinedButton(onPressed: loadingMore ? null : () => load(more: true), child: loadingMore ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Explorar mais oportunidades')),
       const SizedBox(height: 16),
@@ -127,9 +134,7 @@ class _JobsViewState extends State<JobsView> {
     return Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(children: [CircleAvatar(backgroundColor: Brand.teal.withValues(alpha: .12), child: const Icon(Icons.business_outlined, color: Brand.teal)), const SizedBox(width: 12), Expanded(child: Text(job['company'], style: Theme.of(context).textTheme.titleMedium)), Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7), decoration: BoxDecoration(color: Brand.teal.withValues(alpha: .1), borderRadius: BorderRadius.circular(10)), child: Text('${item['match_score']}%', style: const TextStyle(color: Brand.teal, fontWeight: FontWeight.w800)))]),
       const SizedBox(height: 18), Text(job['title'], style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
-      const SizedBox(height: 10), Text('${modalityLabel(job['modality'])} · ${job['location']}', style: Theme.of(context).textTheme.bodyMedium),
-      const SizedBox(height: 6), Text((num.tryParse('${job['salary_min']}') ?? 0) == 0 && (num.tryParse('${job['salary_max']}') ?? 0) == 0 ? 'Faixa salarial não informada' : 'R\$ ${job['salary_min']} a R\$ ${job['salary_max']}', style: const TextStyle(fontWeight: FontWeight.w600)),
-      const SizedBox(height: 14), Text(job['description'] ?? '', maxLines: 3, overflow: TextOverflow.ellipsis),
+      OpportunityDetails(row: {...job, 'match_reasons': item['match_reasons']}, showHeader: false, showScore: false),
       if ((item['missing_skills'] as List? ?? []).isNotEmpty) Padding(padding: const EdgeInsets.only(top: 12), child: Text('Para desenvolver: ${(item['missing_skills'] as List).join(', ')}', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))),
       const SizedBox(height: 16), Row(children: [Expanded(child: OutlinedButton(onPressed: () => details(item), child: const Text('Ver detalhes'))), const SizedBox(width: 12), Expanded(child: FilledButton(onPressed: pending.contains(id) || applied.contains(id) ? null : () => apply(job), child: pending.contains(id) ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : Text(applied.contains(id) ? 'Enviada' : job['source_url'] != null && job['recruiter_id'] == null ? 'Abrir vaga' : 'Candidatar')))]),
     ]));

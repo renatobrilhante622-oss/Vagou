@@ -46,6 +46,9 @@ class Job(Base):
     modality: Mapped[str] = mapped_column(String(16))
     contract_type: Mapped[str | None] = mapped_column(String(16))
     location: Mapped[str] = mapped_column(String(160))
+    city: Mapped[str | None] = mapped_column(String(80))
+    state: Mapped[str | None] = mapped_column(String(2))
+    country: Mapped[str | None] = mapped_column(String(2))
     keywords: Mapped[list] = mapped_column(JSON)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     moderation_status: Mapped[str] = mapped_column(String(16), default='pending', server_default='pending', index=True)
@@ -63,6 +66,22 @@ class Job(Base):
         CheckConstraint("moderation_status IN ('pending','approved','rejected')", name='ck_job_moderation_status'),
         CheckConstraint("modality IN ('remote','hybrid','onsite')"),
     )
+
+    @property
+    def company_name(self) -> str:
+        return self.company
+
+    @property
+    def external_url(self) -> str | None:
+        return self.source_url
+
+    @property
+    def recruiter_email(self) -> str | None:
+        return self.contact_email
+
+    @property
+    def modality_label(self) -> str:
+        return {'remote': 'Remoto', 'hybrid': 'Híbrido', 'onsite': 'Presencial'}.get(self.modality, self.modality)
 
 
 class Application(Base):

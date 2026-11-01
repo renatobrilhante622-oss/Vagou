@@ -14,7 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.courses import COURSES
 from app.db import session
-from app.matching import eligible, evaluate_job, match, normalize
+from app.matching import compatible_region, evaluate_job, is_brazilian_job, job_location_details, match, normalize, title_matches
+from app.job_catalog import quarantine_non_brazilian_jobs, unique_reasons
 from app.models import Application, Job, User
 from app.premium import has_premium_access
 from app.schemas import DeleteAccount, JobCreate, JobOut, PublicJobOut, Preferences, ProfileUpdate, StatusUpdate
@@ -172,8 +173,11 @@ async def download_resume(user: User = Candidate):
 @router.post('/jobs', response_model=JobOut, status_code=201)
 async def create_job(payload: JobCreate, user: User = Recruiter, db: AsyncSession = DB):
     job = Job(**payload.model_dump(), recruiter_id=user.id, moderation_status='pending')
+    if not is_brazilian_job(job):
+        raise HTTPException(422, 'Informe uma Cidade/UF brasileira ou a abrangência Remoto Brasil para esta vaga.')
+    geography = job_location_details(job)
+    job.city, job.state, job.country = geography['city'], geography['state'], 'BR'
     db.add(job)
-    import logging
     await db.commit()
     await db.refresh(job)
     return job
@@ -187,18 +191,19 @@ async def jobs(offset: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=100
     from app.worker import refresh_job_sources
     preferences = {'titles': [title] if title else [], 'keywords': keywords,
         'locations': [f'{city} / {state}' if state else city] if city else []}
+    await quarantine_non_brazilian_jobs()
     try:
         await refresh_job_sources(preferences)
     except Exception as error:
         logger.error('public_job_sync_failed error_type=%s', type(error).__name__)
-    return (await db.scalars(select(Job).where(Job.active.is_(True), Job.moderation_status == 'approved').order_by(Job.created_at.desc(), Job.id).offset(offset).limit(limit))).all()
-
-    logger = logging.getLogger('uvicorn.error')
+    rows = (await db.scalars(select(Job).where(Job.active.is_(True), Job.moderation_status == 'approved').order_by(Job.created_at.desc(), Job.id).offset(offset).limit(limit))).all()
+    return [job for job in rows if is_brazilian_job(job) and compatible_region(job, preferences)
+            and (not title or title_matches(job.title, title))]
 
 @router.get('/jobs/{job_id}', response_model=PublicJobOut)
 async def job_detail(job_id: uuid.UUID, db: AsyncSession = DB):
     job = await db.get(Job, job_id)
-    if not job or not job.active or job.moderation_status != 'approved':
+    if not job or not job.active or job.moderation_status != 'approved' or not is_brazilian_job(job):
         raise HTTPException(404, 'Job not found')
     return job
 
@@ -216,27 +221,46 @@ async def close_job(job_id: uuid.UUID, user: User = Recruiter, db: AsyncSession 
 @router.get('/matches')
 async def matches(offset: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=100), user: User = Candidate, db: AsyncSession = DB):
     from app.worker import refresh_job_sources
+    await quarantine_non_brazilian_jobs()
     collector_status = {'enabled': settings().enable_public_collectors, 'collected_jobs': 0, 'failed_sources': 0, 'configured': False}
     try:
         collector_status = await refresh_job_sources(user.preferences or {})
     except Exception as error:
         logger.error('candidate_match_source_sync_failed error_type=%s', type(error).__name__)
         collector_status['failed_sources'] = 1
-    # Pagination is over active jobs examined; filters can make a page shorter.
-    rows = (await db.scalars(select(Job).where(Job.active.is_(True), Job.moderation_status == 'approved').order_by(Job.created_at.desc(), Job.id).offset(offset).limit(limit))).all()
+    # Scan bounded pages until enough regional recommendations are found.
+    # next_offset remains an offset into examined rows for existing clients.
     items = []
-    for job in rows:
-        if not eligible(job, user.preferences):
-            continue
-        skill_match = match(user.skills, job.keywords)
-        preference_match = evaluate_job(job, user.skills, user.preferences or {})
-        if preference_match['category'] == 'discarded':
-            continue
-        items.append({'job': PublicJobOut.model_validate(job).model_dump(mode='json'),
-            **skill_match, 'match_score': preference_match['match_score'],
-            'category': 'high' if preference_match['category'] == 'strong' else 'observation',
-            'match_reasons': preference_match['match_reasons'] + preference_match['missed_reasons']})
-    return {'items': items, 'next_offset': offset + len(rows) if len(rows) == limit else None,
+    examined = 0
+    exhausted = False
+    while len(items) < limit and examined < 1000:
+        rows = (await db.scalars(select(Job).where(Job.active.is_(True), Job.moderation_status == 'approved')
+            .order_by(Job.created_at.desc(), Job.id).offset(offset + examined).limit(100))).all()
+        if not rows:
+            exhausted = True
+            break
+        for job in rows:
+            examined += 1
+            if not is_brazilian_job(job) or not compatible_region(job, user.preferences or {}):
+                continue
+            skill_match = match(user.skills, job.keywords)
+            preference_match = evaluate_job(job, user.skills, user.preferences or {})
+            if preference_match['category'] == 'discarded':
+                continue
+            items.append({'job': PublicJobOut.model_validate(job).model_dump(mode='json'),
+                **skill_match, 'match_score': preference_match['match_score'],
+                'category': 'high' if preference_match['category'] == 'strong' else 'observation',
+                'match_reasons': unique_reasons(preference_match['match_reasons'] + preference_match['missed_reasons'])})
+            if len(items) >= limit:
+                break
+        if len(rows) < 100 and len(items) < limit:
+            exhausted = True
+            break
+    collector_status['fallback_active'] = bool(collector_status.get('failed_sources'))
+    # Provider failures remain in server logs. Regional searches and the verified
+    # local index let the candidate continue without a broken-source alert.
+    collector_status['failed_sources'] = 0
+    return {'items': items, 'next_offset': None if exhausted else offset + examined,
         'collector_status': collector_status}
 
 
@@ -246,7 +270,7 @@ async def manual_apply(job_id: uuid.UUID, user: User = Candidate, db: AsyncSessi
     if not user:
         raise HTTPException(401, 'Esta conta não está mais disponível.')
     job = await db.scalar(select(Job).where(Job.id == job_id, Job.active.is_(True), Job.moderation_status == 'approved').with_for_update())
-    if not job:
+    if not job or not is_brazilian_job(job):
         raise HTTPException(404, 'Job not found')
     if job.recruiter_id is None:
         if not job.source_url:
@@ -267,7 +291,12 @@ async def applications(offset: int = Query(0, ge=0), limit: int = Query(20, ge=1
     rows = (await db.execute(query.order_by(Application.created_at.desc(), Application.id).offset(offset).limit(limit))).all()
     return [{'id': a.id, 'job_id': j.id, 'job_title': j.title, 'candidate_id': a.candidate_id,
              'source': a.source, 'status': a.status, 'match_score': a.match_score, 'created_at': a.created_at, 'status_updated_at': a.status_updated_at,
-             'company': j.company, 'job_url': j.source_url, 'job_path': f'/v1/jobs/{j.id}',
+             'company': j.company, 'company_name': j.company, 'job_url': j.source_url,
+             'external_url': j.source_url, 'job_path': f'/v1/jobs/{j.id}',
+             'description': j.description, 'contact_email': j.contact_email, 'recruiter_email': j.contact_email,
+             'location': j.location, 'city': job_location_details(j)['city'], 'state': job_location_details(j)['state'],
+             'modality': j.modality, 'contract_type': j.contract_type,
+             'salary_min': float(j.salary_min), 'salary_max': float(j.salary_max),
              'source_name': j.source_name, 'candidate_name': candidate_name,
              'delivery_status': a.delivery_status, 'destination_channel': a.destination_channel} for a, j, candidate_name in rows]
 
@@ -397,7 +426,7 @@ async def dashboard(user: User = Candidate, db: AsyncSession = DB):
     # Stream bounded batches instead of retaining the entire job catalog.
     result = await db.stream_scalars(select(Job).where(Job.active.is_(True), Job.moderation_status == 'approved').execution_options(yield_per=200))
     async for job in result:
-        if eligible(job, user.preferences) and evaluate_job(job, user.skills, user.preferences or {})['category'] == 'possible':
+        if is_brazilian_job(job) and compatible_region(job, user.preferences or {}) and evaluate_job(job, user.skills, user.preferences or {})['category'] == 'possible':
             observation += 1
     return {'total_applications': total, 'manual': sum(r[2] for r in rows if r[0] == 'manual'),
             'automatic': sum(r[2] for r in rows if r[0] == 'automatic'), 'observation_jobs': observation,

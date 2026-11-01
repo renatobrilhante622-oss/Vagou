@@ -1,6 +1,7 @@
 import unittest
 from types import SimpleNamespace
-from app.matching import eligible, evaluate_job, filter_reason, match
+from app.matching import (advertised_skills, compatible_region, dedupe_reasons, eligible,
+    evaluate_job, filter_reason, is_brazilian_job, job_location_details, match)
 
 
 class MatchingTests(unittest.TestCase):
@@ -69,7 +70,7 @@ class InternationalMatchingTests(unittest.TestCase):
     def test_brazilian_role_and_skill_aliases_are_explainable(self):
         job = SimpleNamespace(title='Data Analyst', description='Data analysis with SQL and spreadsheets.',
             keywords=['SQL', 'Excel'], salary_max=8000, salary_min=4000,
-            modality='remote', location='Latin America', contract_type=None)
+            modality='remote', location='Brasil', contract_type=None)
         result = evaluate_job(job, ['sql', 'planilhas'], {'titles': ['Analista de Dados'],
             'locations': ['Brasília / DF'], 'modalities': ['remote']})
         self.assertEqual(result['match_score'], 100)
@@ -81,7 +82,7 @@ class InternationalMatchingTests(unittest.TestCase):
 
     def test_missing_salary_or_inferred_skills_remain_possible_not_auto(self):
         job = SimpleNamespace(title='Python Developer', description='Build APIs using Python and Docker.',
-            keywords=['python'], salary_max=0, salary_min=0, modality='remote', location='Worldwide', contract_type=None)
+            keywords=['python'], salary_max=0, salary_min=0, modality='remote', location='Remoto Brasil', contract_type=None)
         preferences = {'titles': ['Desenvolvedor Python'], 'locations': ['São Paulo / SP'],
             'modalities': ['remote'], 'min_salary': 5000}
         self.assertTrue(eligible(job, preferences))
@@ -110,7 +111,7 @@ class HardPreferenceScoreTests(unittest.TestCase):
             'modalities': ['remote'], 'min_salary': 5000}
         base = dict(title='Python Developer', description='Build distributed Python services.',
             keywords=['python'], salary_min=5000, salary_max=8000, modality='remote',
-            location='Worldwide', contract_type=None)
+            location='Remoto Brasil', contract_type=None)
         for changed in [dict(location='Europe'), dict(location='UK'), dict(location='Berlin'), dict(modality='onsite'),
                         dict(salary_max=4000, salary_min=3000), dict(title='Java Developer')]:
             with self.subTest(changed=changed):
@@ -119,6 +120,84 @@ class HardPreferenceScoreTests(unittest.TestCase):
                 self.assertLess(result['match_score'], 70)
                 self.assertNotEqual(result['category'], 'strong')
                 self.assertIn(filter_reason(job, preferences), result['missed_reasons'])
-        for region in ['Worldwide', 'Brazil', 'Latin America']:
+        for region in ['Brasília / DF', 'Brazil', 'Remoto Brasil']:
             job = SimpleNamespace(**{**base, 'location': region})
             self.assertGreaterEqual(evaluate_job(job, ['python'], preferences)['match_score'], 70)
+
+
+class BrazilianSupportMatchingTests(unittest.TestCase):
+    def job(self, **changes):
+        values = dict(title='Analista de Suporte N2', description='Suporte técnico em Windows e redes corporativas.',
+            keywords=['suporte', 'windows', 'redes'], salary_min=3500, salary_max=5000,
+            modality='onsite', location='Brasília / Distrito Federal', contract_type='clt', country='BR')
+        return SimpleNamespace(**{**values, **changes})
+
+    def preferences(self):
+        return {'titles': ['Analista de Suporte N2'], 'keywords': ['suporte', 'tecnologia'],
+                'locations': ['Brasília / DF'], 'modalities': ['onsite'], 'min_salary': 3000}
+
+    def test_exact_support_role_high_and_related_service_desk_requires_review(self):
+        skills = ['suporte', 'windows', 'redes']
+        exact = evaluate_job(self.job(), skills, self.preferences())
+        self.assertGreaterEqual(exact['match_score'], 70)
+        self.assertEqual(exact['category'], 'strong')
+        adjacent = evaluate_job(self.job(title='Analista de Service Desk',
+            keywords=['atendimento', 'windows', 'office365']), skills, self.preferences())
+        self.assertTrue(40 <= adjacent['match_score'] < 70, adjacent)
+        self.assertEqual(adjacent['category'], 'possible')
+        self.assertTrue(any('mesma área' in reason for reason in adjacent['match_reasons']))
+        other_level = evaluate_job(self.job(title='Analista de Suporte N3'), skills, self.preferences())
+        self.assertTrue(40 <= other_level['match_score'] < 70, other_level)
+
+    def test_only_brazilian_locations_are_admitted_even_without_city_preferences(self):
+        for location, country in [('Munich, Bavaria', None), ('Worldwide', None),
+                                  ('Latin America', None), ('Brasília / DF', 'DE'),
+                                  ('Springfield, MA', None), ('Oxford, MS', None)]:
+            with self.subTest(location=location, country=country):
+                job = self.job(location=location, country=country)
+                self.assertFalse(is_brazilian_job(job))
+                self.assertFalse(compatible_region(job, {}))
+                self.assertEqual(evaluate_job(job, ['suporte', 'windows', 'redes'], {})['category'], 'discarded')
+        for location in ['Remoto Brasil', 'Recife / Pernambuco', 'Goiânia, Goiás', 'Campinas / SP',
+                         'Franca / SP', 'Brasília (DF)']:
+            with self.subTest(location=location):
+                self.assertTrue(is_brazilian_job(self.job(location=location, country=None)))
+
+    def test_full_state_names_structured_fields_and_city_preferences_agree(self):
+        job = self.job(location='Brasília, Distrito Federal, Brasil')
+        details = job_location_details(job)
+        self.assertEqual((details['city'], details['state']), ('Brasília', 'DF'))
+        self.assertTrue(compatible_region(job, self.preferences()))
+        self.assertFalse(compatible_region(self.job(location='Goiânia / GO'), self.preferences()))
+        self.assertTrue(compatible_region(self.job(location='Remoto Brasil', modality='remote'), self.preferences()))
+        structured = self.job(location='Não informada', city='Brasília', state='Distrito Federal')
+        self.assertTrue(compatible_region(structured, self.preferences()))
+        self.assertTrue(compatible_region(self.job(location='Brasília (DF)', country=None), self.preferences()))
+        self.assertTrue(compatible_region(self.job(location='São Paulo', country=None), {'locations': ['São Paulo / SP']}))
+        self.assertTrue(is_brazilian_job(self.job(location='Franca / SP', city='Franca', state='SP', country='BR')))
+        interior = self.job(location='Corumbá / MS', city='Corumbá', state='MS', country='BR')
+        self.assertTrue(is_brazilian_job(interior))
+        self.assertTrue(compatible_region(interior, {'locations': ['Corumbá / MS']}))
+        self.assertEqual(job_location_details(interior)['state'], 'MS')
+
+    def test_requirement_extraction_uses_observed_words_and_reasons_are_unique(self):
+        terms = advertised_skills('Experiência comprovada em suporte técnico, Windows e redes TCP/IP.')
+        self.assertIn('technical support', terms)
+        self.assertIn('windows', terms)
+        self.assertIn('networking', terms)
+        self.assertNotIn('python', terms)
+        self.assertEqual(dedupe_reasons(['Cargo compatível.', ' Cargo compatível. ', 'Localização compatível.']),
+                         ['Cargo compatível.', 'Localização compatível.'])
+        result = evaluate_job(self.job(), ['suporte', 'windows', 'redes'], self.preferences())
+        self.assertEqual(len(result['match_reasons']), len(set(result['match_reasons'])))
+
+    def test_explicit_support_specialization_includes_core_without_inventing_advanced_skills(self):
+        for specialization in ['Suporte N2', 'Suporte NOC', 'Suporte técnico nível 2']:
+            with self.subTest(specialization=specialization):
+                result = match([specialization, 'Windows'], ['suporte', 'Windows'])
+                self.assertEqual(result['match_score'], 100)
+                self.assertEqual(result['missing_skills'], [])
+        self.assertEqual(match(['Suporte N1'], ['Suporte N2'])['match_score'], 0)
+        self.assertEqual(match(['Suporte'], ['Suporte NOC'])['match_score'], 0)
+        self.assertEqual(match(['Java'], ['JavaScript'])['match_score'], 0)
+        self.assertEqual(match([], ['suporte'])['match_score'], 0)

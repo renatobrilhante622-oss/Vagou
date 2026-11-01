@@ -112,6 +112,9 @@ class _JobEditorState extends State<JobEditor> {
         'title': title.text.trim(), 'company': widget.companyName, 'description': description.text.trim(),
         'salary_min': double.parse(min.text.replaceAll(',', '.')), 'salary_max': double.parse(max.text.replaceAll(',', '.')),
         'modality': modality, 'contract_type': contractType, 'location': modality == 'remote' ? 'Brasil' : '${city.text.trim()} / ${state.text.trim().toUpperCase()}',
+        'country': 'BR',
+        if (modality != 'remote') 'city': city.text.trim(),
+        if (modality != 'remote') 'state': state.text.trim().toUpperCase(),
         'keywords': skills.text.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList(),
       });
       if (!mounted) return;

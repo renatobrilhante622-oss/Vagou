@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'api.dart';
 import 'preferences.dart';
+import 'opportunity_details.dart';
 import 'ui.dart';
 
 Future<void> showAutomationPanel(BuildContext context, {
@@ -202,28 +203,18 @@ class _AutomationPanelState extends State<_AutomationPanel> {
         isScrollControlled: true, builder: (context) => SafeArea(child: SingleChildScrollView(
           padding: const EdgeInsets.all(24), child: Column(mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('${job['title']}', style: Theme.of(context).textTheme.headlineSmall),
-              Text('${job['company']} · ${job['location']}'),
-              const SizedBox(height: 16), Text('${job['description']}'),
+              OpportunityDetails(row: Map<String, dynamic>.from(job as Map), initiallyExpanded: true),
             ]))));
     } catch (error) { if (mounted) await friendlyError(context, error); }
   }
 
   Widget _eventCard(Map event) {
-    final reasons = List<String>.from(event['match_reasons'] as List? ?? const []);
     return Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text('${event['job_title'] ?? 'Oportunidade'}', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
-      Text('${event['company_name'] ?? event['company'] ?? 'Empresa não informada'} · ${event['location'] ?? 'Localização não informada'}'),
-      Wrap(spacing: 8, children: [
-        if (event['match_score'] != null) Chip(label: Text('${event['match_score']}% de compatibilidade')),
-        Chip(label: Text('${event['source_name'] ?? 'Vagou!'}')),
-        Chip(label: Text(statusLabel('${event['status']}'))),
-      ]),
+      OpportunityDetails(row: event),
       if (event['destination_channel'] != null) Text('Canal de destino: ${const {'smtp': 'contato de recrutamento por e-mail', 'email': 'contato de recrutamento por e-mail', 'platform': 'recrutador no Vagou!', 'portal': 'portal oficial', 'portal_link': 'portal oficial', 'portal_search': 'pesquisa no portal', 'candidate_review': 'avaliação individual', 'existing_application': 'candidatura existente'}[event['destination_channel']] ?? 'consulte a vaga'}'),
       if (event['delivery_status'] != null) Text(const {'pending': 'Notificação aguardando envio.', 'queued': 'Notificação na fila de envio.', 'sent': 'Mensagem aceita pelo servidor de e-mail.', 'smtp_accepted': 'Mensagem aceita pelo servidor de e-mail.', 'retrying': 'O envio da notificação será tentado novamente.', 'failed': 'A notificação não foi entregue; confira o relatório.', 'cancelled': 'Envio da notificação cancelado.', 'not_requested': 'Registro disponível no Vagou!.', 'requires_manual': 'Conclua a candidatura no portal oficial.'}[event['delivery_status']] ?? 'Consulte o relatório para acompanhar a notificação.'),
-      if (reasons.isNotEmpty) Text(reasons.join(' · ')),
-      Text('${event['detail'] ?? ''}'),
-      TextButton.icon(onPressed: () => _openEvent(event), icon: const Icon(Icons.open_in_new), label: const Text('Candidatar-se / Abrir Vaga')),
+      if (opportunityValue(event, const ['external_url', 'job_url']).isEmpty || opportunityValue(event, const ['external_url', 'job_url']).startsWith('/'))
+        TextButton.icon(onPressed: () => _openEvent(event), icon: const Icon(Icons.open_in_new), label: const Text('Candidatar-se / Abrir Vaga')),
     ]));
   }
 

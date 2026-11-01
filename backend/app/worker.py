@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.automation_models import AutomationEvent, AutomationRun
 from app.config import settings
 from app.collectors import collect_authorized_sources
-from app.matching import evaluate_job
+from app.matching import compatible_region, dedupe_reasons, evaluate_job, is_brazilian_job, job_location_details
 from app.models import Application, Job, User
 from app.premium import has_premium_access, premium_test_emails
 from app.services import apply
@@ -43,6 +43,22 @@ logger = logging.getLogger(__name__)
 MAX_DETAILED_EVENTS_PER_RUN = 200
 
 
+def evaluation_reasons(evaluation):
+    """Keep one readable occurrence of each explainable matching reason."""
+    return dedupe_reasons(evaluation.get('match_reasons', []) + evaluation.get('missed_reasons', []))
+
+
+def vacancy_snapshot(job):
+    """Public vacancy facts only; unknown values remain explicitly unknown."""
+    geography = job_location_details(job)
+    return {'description': (job.description or '')[:3000],
+            'contact_email': job.contact_email, 'city': geography.get('city'),
+            'state': geography.get('state'), 'modality': job.modality,
+            'contract_type': job.contract_type,
+            'salary_min': float(job.salary_min) if job.salary_min is not None else None,
+            'salary_max': float(job.salary_max) if job.salary_max is not None else None}
+
+
 def event(db, run, status, detail, job=None, evaluation=None, *, destination_channel=None, search_channel=None):
     logged = getattr(run, '_logged_event_count', 0)
     if logged >= MAX_DETAILED_EVENTS_PER_RUN:
@@ -55,9 +71,9 @@ def event(db, run, status, detail, job=None, evaluation=None, *, destination_cha
         company=job.company if job else None, location=job.location if job else (search_channel.get('location') if search_channel else None),
         source_name=job.source_name if job else (search_channel.get('source_name') if search_channel else None),
         match_score=evaluation['match_score'] if evaluation else None,
-        match_reasons=evaluation['match_reasons'] + evaluation['missed_reasons'] if evaluation else None,
+        match_reasons=evaluation_reasons(evaluation) if evaluation else None,
         destination_channel=destination_channel or (search_channel.get('destination_channel') if search_channel else None),
-        status=status, detail=detail[:255]))
+        status=status, detail=detail[:255], **(vacancy_snapshot(job) if job else {})))
 
 
 def report_entry(job, evaluation, status, destination_channel, delivery_status=None):
@@ -65,9 +81,9 @@ def report_entry(job, evaluation, status, destination_channel, delivery_status=N
             'location': job.location, 'source_name': job.source_name,
             'external_url': job.source_url or f'/v1/jobs/{job.id}',
             'match_score': evaluation['match_score'],
-            'match_reasons': evaluation['match_reasons'] + evaluation['missed_reasons'],
+            'match_reasons': evaluation_reasons(evaluation),
             'status': status, 'destination_channel': destination_channel,
-            'delivery_status': delivery_status}
+            'delivery_status': delivery_status, **vacancy_snapshot(job)}
 
 
 async def automate(candidate_id=None, force=False, run_id=None, progress=None):
@@ -75,6 +91,8 @@ async def automate(candidate_id=None, force=False, run_id=None, progress=None):
     run_id = UUID(str(run_id)) if run_id else None
     if (force or run_id) and candidate_id is None:
         raise ValueError('A requested cycle must target one candidate')
+    from app.job_catalog import quarantine_non_brazilian_jobs
+    await quarantine_non_brazilian_jobs()
     engine = create_async_engine(settings().database_url, pool_pre_ping=True)
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     submitted = 0
@@ -165,7 +183,7 @@ async def automate(candidate_id=None, force=False, run_id=None, progress=None):
                                 'match_score': None, 'match_reasons': [], 'company_name': None})
                         if failed_sources:
                             run.error_count += failed_sources
-                            event(db, run, 'failed', f'{failed_sources} fonte(s) pública(s) indisponível(is); a varredura local continuará.')
+                            logger.info('automation_sources_degraded count=%s fallback=verified_brazilian_catalog', failed_sources)
                         run.status = 'running'
                         if not user.resume_key:
                             event(db, run, 'missing_resume', 'Envie um currículo PDF para ativar os envios automáticos.')
@@ -185,6 +203,10 @@ async def automate(candidate_id=None, force=False, run_id=None, progress=None):
                                 applied_ids = set((await db.scalars(select(Application.job_id).where(
                                     Application.candidate_id == user.id, Application.job_id.in_([job.id for job in jobs])))).all())
                                 for job in jobs:
+                                    if not is_brazilian_job(job) or not compatible_region(job, preferences):
+                                        # Unknown/foreign scope is never counted as a
+                                        # Brazilian vacancy or allowed to auto-submit.
+                                        continue
                                     run.scanned_jobs += 1
                                     if job.recruiter_id is None:
                                         run.external_jobs_scanned += 1
@@ -192,10 +214,10 @@ async def automate(candidate_id=None, force=False, run_id=None, progress=None):
                                     score = evaluation['match_score']
                                     if score < 40:
                                         run.filtered_jobs += 1
-                                        event(db, run, 'filtered', '; '.join(evaluation['missed_reasons']) or 'Compatibilidade abaixo de 40%.', job, evaluation)
+                                        event(db, run, 'filtered', 'Vaga fora dos critérios desta rodada.', job, evaluation)
                                     elif score < 70:
                                         run.possible_match_jobs += 1
-                                        event(db, run, 'possible_match', '; '.join(evaluation['match_reasons'] + evaluation['missed_reasons']), job, evaluation)
+                                        event(db, run, 'possible_match', 'Oportunidade próxima ao seu perfil para avaliação individual.', job, evaluation)
                                         entries.append(report_entry(job, evaluation, 'possible_match', 'candidate_review'))
                                     else:
                                         run.eligible_jobs += 1
@@ -289,9 +311,11 @@ async def automate(candidate_id=None, force=False, run_id=None, progress=None):
 
 async def refresh_job_sources(preferences: dict | None = None):
     cfg = settings()
+    from app.job_catalog import quarantine_non_brazilian_jobs
+    archived = await quarantine_non_brazilian_jobs()
     if not cfg.enable_public_collectors:
         return {'imported': 0, 'collected_jobs': 0, 'failed_sources': 0,
-            'configured': False, 'enabled': False}
+            'configured': False, 'enabled': False, 'archived_jobs': archived}
     has_search_query = bool(preferences and any(preferences.get(key) for key in ('titles', 'keywords', 'locations', 'modalities', 'contract_types', 'min_salary')))
     if not cfg.job_source_urls and not has_search_query:
         return {'imported': 0, 'collected_jobs': 0, 'failed_sources': 0,
@@ -306,19 +330,23 @@ async def refresh_job_sources(preferences: dict | None = None):
             preferences=preferences)
         for source in sources:
             search_channels.extend(asdict(channel) for channel in getattr(source, 'search_channels', []))
-            collected += len(source.jobs)
             async with sessions.begin() as db:
                 for job in source.jobs:
+                    if not is_brazilian_job(job):
+                        continue
+                    collected += 1
                     values = {**job.values(), 'source_name': source.name, 'recruiter_id': None,
                         'active': True, 'moderation_status': 'approved' if source.auto_approve or cfg.job_source_auto_approve else 'pending'}
                     statement = insert(Job).values(**values)
                     updates = {key: getattr(statement.excluded, key) for key in (
                         'title', 'company', 'description', 'location', 'modality', 'contract_type',
-                        'keywords', 'salary_min', 'salary_max', 'source_url', 'contact_email')}
+                        'keywords', 'salary_min', 'salary_max', 'source_url', 'contact_email',
+                        'city', 'state', 'country')}
                     result = await db.execute(statement.on_conflict_do_update(
                         index_elements=['source_name', 'source_external_id'], set_=updates).returning(Job.id))
                     imported += int(result.scalar_one_or_none() is not None)
-        return {'imported': imported, 'collected_jobs': collected, 'failed_sources': failed, 'configured': True, 'search_channels': search_channels}
+        return {'imported': imported, 'collected_jobs': collected, 'failed_sources': failed,
+            'configured': True, 'search_channels': search_channels, 'archived_jobs': archived}
     finally:
         await engine.dispose()
 

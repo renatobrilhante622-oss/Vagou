@@ -103,6 +103,10 @@ def test_committed_delivery_updates_status_and_preserves_registration_on_failure
             assert entry['delivery_status'] == ('queued' if smtp_failure else 'sent')
             assert entry['external_url'] == job.source_url
             assert entry['company_name'] == 'Fixture' and entry['destination_channel'] == 'email'
+            assert entry['description'] == job.description
+            assert entry['contact_email'] == 'recruiter@example.com'
+            assert entry['recruiter_email'] == entry['contact_email']
+            assert entry['modality'] == 'remote' and entry['salary_max'] == 7000
             assert entry['status'] == 'requires_manual' and entry['match_score'] == 90
             with patch('app.application_mail.settings', return_value=cfg), patch('app.application_mail.email_configured', return_value=True), patch('app.application_mail.send_transactional_message') as repeated:
                 again = await mail.process_application_outbox()
