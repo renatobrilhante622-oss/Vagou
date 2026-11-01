@@ -60,6 +60,7 @@ def test_regional_feed_finds_high_and_possible_matches_and_archives_foreign_rows
                 response = await client.get('/v1/matches?limit=2', headers={'Authorization':'Bearer ' + token(candidate)})
                 assert response.status_code == 200, response.text
                 payload = response.json()
+                assert payload['collector_status']['enabled'] is False, 'The disposable API must not import public internet jobs during fixture assertions'
                 rows = {row['job']['id']: row for row in payload['items']}
                 assert set(rows) == {str(high_id), str(possible_id)}
                 assert rows[str(high_id)]['match_score'] >= 70 and rows[str(high_id)]['category'] == 'high'

@@ -31,6 +31,10 @@ jobs:
       STORAGE_DIR: /tmp/vagou-ci-storage
       VAGOU_TEST_URL: http://127.0.0.1:8000
       MODERATOR_EMAILS: '["moderator-ci@example.com"]'
+      # The API and pytest must share isolation; conftest cannot change the
+      # environment of an already-running uvicorn process.
+      ENABLE_PUBLIC_COLLECTORS: 'false'
+      VAGOU_ENV_FILE: /dev/null
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
