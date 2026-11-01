@@ -91,7 +91,7 @@ class _CandidateProfileState extends State<CandidateProfile> {
     ].where((value) => value).length;
     final profileStrength = (completion * 100 / 6).round();
     final premium = _premium || user['is_premium'] == true;
-    return ListView(padding: const EdgeInsets.fromLTRB(20, 8, 20, 32), children: [
+    return ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 24), children: [
       Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [CircleAvatar(radius: 32, backgroundColor: Brand.teal.withValues(alpha: .12), child: Text(_name.text.trim().isEmpty ? 'V' : _name.text.trim().substring(0, 1).toUpperCase(), style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w800, color: Brand.teal))), const SizedBox(width: 16), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('${user['name']}', style: Theme.of(context).textTheme.titleLarge), const SizedBox(height: 4), Text('${user['email']}', style: Theme.of(context).textTheme.bodySmall), const SizedBox(height: 8), Wrap(spacing: 6, children: [Chip(visualDensity: VisualDensity.compact, avatar: Icon(user['email_verified'] == true ? Icons.verified : Icons.mark_email_unread_outlined, size: 16), label: Text(user['email_verified'] == true ? 'Verificada' : 'Pendente')), if (premium) const Chip(visualDensity: VisualDensity.compact, avatar: Icon(Icons.workspace_premium, size: 16), label: Text('Premium'))])]))]),
         const SizedBox(height: 24),
@@ -103,7 +103,7 @@ class _CandidateProfileState extends State<CandidateProfile> {
       Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         _summaryRow(Icons.work_outline, 'Cargo-alvo', target.isEmpty ? 'Não informado' : target.join(', ')),
         _summaryRow(Icons.location_on_outlined, 'Cidade/UF', locations.isEmpty ? 'Não informada' : locations.join(', ')),
-        _summaryRow(Icons.payments_outlined, 'Pretensão mínima', (num.tryParse('${preferences['min_salary'] ?? 0}') ?? 0) > 0 ? 'R\$ ${preferences['min_salary']}' : 'Não informada'),
+        _summaryRow(Icons.payments_outlined, 'Pretensão mínima', (num.tryParse('${preferences['min_salary'] ?? 0}') ?? 0) > 0 ? formatBRL(preferences['min_salary']) : 'Não informada'),
       ])),
       const SectionTitle(title: 'Dados pessoais', subtitle: 'Informações profissionais para apresentar sua trajetória.'),
       Panel(child: Form(key: _profileKey, child: Column(children: [

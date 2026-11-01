@@ -3,15 +3,15 @@ import 'package:url_launcher/url_launcher.dart';
 import 'api.dart';
 
 class Brand {
-  static const navy = Color(0xFF102A43);
-  static const teal = Color(0xFF087F8C);
+  static const navy = Color(0xFF0F172A);
+  static const teal = Color(0xFF2563EB);
   static const coral = Color(0xFFEF8354);
   static ThemeData theme(Brightness brightness) {
     final dark = brightness == Brightness.dark;
-    final scheme = ColorScheme.fromSeed(seedColor: teal, brightness: brightness);
+    final scheme = ColorScheme.fromSeed(seedColor: teal, brightness: brightness).copyWith(primary: dark ? const Color(0xFF93C5FD) : navy, secondary: teal, surface: dark ? const Color(0xFF111827) : const Color(0xFFFFFFFF));
     return ThemeData(
       useMaterial3: true, brightness: brightness, colorScheme: scheme,
-      scaffoldBackgroundColor: dark ? const Color(0xFF0B1520) : const Color(0xFFF3F6FA),
+      scaffoldBackgroundColor: dark ? const Color(0xFF0B1520) : const Color(0xFFF8FAFC),
       appBarTheme: const AppBarTheme(centerTitle: false, elevation: 0, scrolledUnderElevation: 0),
       inputDecorationTheme: InputDecorationTheme(
         filled: true, fillColor: scheme.surface,
@@ -43,8 +43,8 @@ class Panel extends StatelessWidget {
   const Panel({super.key, required this.child, this.padding = const EdgeInsets.all(20)});
   @override
   Widget build(BuildContext context) => Container(margin: const EdgeInsets.only(bottom: 16), padding: padding, decoration: BoxDecoration(
-    color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(24),
-    border: Border.all(color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: .5)),
+    color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(12),
+    border: Border.all(color: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
     boxShadow: [BoxShadow(color: Brand.navy.withValues(alpha: .035), blurRadius: 18, offset: const Offset(0, 5))],
   ), child: child);
 }
@@ -54,8 +54,8 @@ class SectionTitle extends StatelessWidget {
   final String? subtitle;
   const SectionTitle({super.key, required this.title, this.subtitle});
   @override
-  Widget build(BuildContext context) => Padding(padding: const EdgeInsets.only(bottom: 18, top: 8), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-    Text(title, style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),
+  Widget build(BuildContext context) => Padding(padding: const EdgeInsets.only(bottom: 12, top: 4), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontSize: 18, fontWeight: FontWeight.w700)),
     if (subtitle != null) ...[const SizedBox(height: 6), Text(subtitle!, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant))],
   ]));
 }
@@ -99,3 +99,14 @@ Future<void> externalLink(String value) async {
     throw const ApiException('Não foi possível abrir este endereço. Tente novamente.');
   }
 }
+
+String formatBRL(dynamic value) {
+  final number = num.tryParse('$value');
+  if (number == null || !number.isFinite) return 'Não informado';
+  final fixed = number.toStringAsFixed(number == number.roundToDouble() ? 0 : 2).split('.');
+  final whole = fixed.first.replaceAllMapped(RegExp(r'(\d)(?=(\d{3})+(?!\d))'), (m) => '${m[1]}.');
+  return 'R\$ $whole${fixed.length > 1 ? ',${fixed.last}' : ''}';
+}
+
+Color matchBackground(num score) => score >= 70 ? const Color(0xFFECFDF5) : const Color(0xFFFFFBEB);
+Color matchForeground(num score) => score >= 70 ? const Color(0xFF059669) : const Color(0xFFD97706);

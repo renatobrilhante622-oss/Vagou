@@ -101,7 +101,7 @@ class _JobsViewState extends State<JobsView> {
     if (loading) return const Center(child: CircularProgressIndicator());
     if (error != null && items.isEmpty) return EmptyState(icon: Icons.cloud_off_outlined, title: 'As oportunidades estão chegando', message: error is ApiException ? (error as ApiException).message : 'Não conseguimos carregar suas vagas.', onRetry: load);
     final visible = items.where((e) => category == 'high' ? e['category'] == 'high' : e['category'] == 'observation').toList();
-    return RefreshIndicator(onRefresh: load, child: ListView(padding: const EdgeInsets.all(20), physics: const AlwaysScrollableScrollPhysics(), children: [
+    return RefreshIndicator(onRefresh: load, child: ListView(padding: const EdgeInsets.fromLTRB(16, 8, 16, 24), physics: const AlwaysScrollableScrollPhysics(), children: [
       Wrap(spacing: 10, runSpacing: 8, children: [
         OutlinedButton.icon(onPressed: _editPreferences, icon: const Icon(Icons.tune), label: const Text('Filtros e Preferências')),
         FilledButton.icon(onPressed: () => showAutomationPanel(context, api: widget.api, onChanged: _refreshAfterAutomation), icon: const Icon(Icons.bolt), label: const Text('Automação Premium ⚡')),
@@ -132,7 +132,7 @@ class _JobsViewState extends State<JobsView> {
     final job = Map<String, dynamic>.from(item['job']);
     final id = job['id'].toString();
     return Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Row(children: [CircleAvatar(backgroundColor: Brand.teal.withValues(alpha: .12), child: const Icon(Icons.business_outlined, color: Brand.teal)), const SizedBox(width: 12), Expanded(child: Text(job['company'], style: Theme.of(context).textTheme.titleMedium)), Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7), decoration: BoxDecoration(color: Brand.teal.withValues(alpha: .1), borderRadius: BorderRadius.circular(10)), child: Text('${item['match_score']}%', style: const TextStyle(color: Brand.teal, fontWeight: FontWeight.w800)))]),
+      Row(children: [CircleAvatar(backgroundColor: Brand.teal.withValues(alpha: .12), child: const Icon(Icons.business_outlined, color: Brand.teal)), const SizedBox(width: 12), Expanded(child: Text(job['company'], style: Theme.of(context).textTheme.titleMedium)), Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7), decoration: BoxDecoration(color: matchBackground(item['match_score'] as num), borderRadius: BorderRadius.circular(10)), child: Text('${item['match_score']}%', style: TextStyle(color: matchForeground(item['match_score'] as num), fontWeight: FontWeight.w800)))]),
       const SizedBox(height: 18), Text(job['title'], style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
       OpportunityDetails(row: {...job, 'match_reasons': item['match_reasons']}, showHeader: false, showScore: false),
       if ((item['missing_skills'] as List? ?? []).isNotEmpty) Padding(padding: const EdgeInsets.only(top: 12), child: Text('Para desenvolver: ${(item['missing_skills'] as List).join(', ')}', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))),

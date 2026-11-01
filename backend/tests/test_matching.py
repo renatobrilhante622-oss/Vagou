@@ -201,3 +201,14 @@ class BrazilianSupportMatchingTests(unittest.TestCase):
         self.assertEqual(match(['Suporte'], ['Suporte NOC'])['match_score'], 0)
         self.assertEqual(match(['Java'], ['JavaScript'])['match_score'], 0)
         self.assertEqual(match([], ['suporte'])['match_score'], 0)
+
+class ProfessionalRelevanceTests(unittest.TestCase):
+    def test_geography_and_work_style_never_replace_professional_relevance(self):
+        job = SimpleNamespace(title='Auxiliar Administrativo', description='Organizar documentos e arquivos da empresa.',
+            keywords=['organização', 'excel'], salary_min=3000, salary_max=5000,
+            modality='onsite', location='Brasília / DF', country='BR', contract_type='clt')
+        for skills in [[], ['excel'], ['suporte', 'windows']]:
+            result = evaluate_job(job, skills, {'titles':['Suporte N2'], 'keywords':['suporte','tecnologia','NOC'],
+                'locations':['Brasília / DF'], 'modalities':['onsite'], 'min_salary':3000})
+            self.assertLess(result['match_score'], 40)
+            self.assertEqual(result['category'], 'discarded')

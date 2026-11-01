@@ -362,6 +362,23 @@ def evaluate_job(job, skills: list[str], preferences: dict) -> dict:
             'Tipo de contrato compatível.' if contract_score == 100 else
             'Tipo de contrato não informado.' if contract_score == 50 else 'Tipo de contrato diferente do selecionado.')
 
+    # Geography, salary and modality cannot establish professional relevance.
+    semantic_title = any(title_matches(job.title, title) or related_title(job.title, title) for title in titles)
+    technical_terms = ('python', 'sql', 'windows', 'linux', 'networking', 'infrastructure',
+                       'hardware', 'active directory', 'tcp/ip', 'noc', 'service desk', 'help desk')
+    advertised = canonical_text(' '.join([job.title, job.description, *(job.keywords or [])]))
+    sought_support = any(_support_role(title) for title in titles) or any(
+        _support_role(value) or canonical_text(value) in {'ti', 'tecnologia', 'information technology'} for value in preferences.get('keywords', []))
+    technical_overlap = any(text_contains(advertised, term) and any(
+        text_contains(value, term) for value in [*skills, *preferences.get('keywords', [])]) for term in technical_terms)
+    keyword_overlap = bool(keywords and _keyword_coverage(job, keywords))
+    relevant = semantic_title or technical_overlap or (keyword_overlap and not sought_support) or (not titles and not keywords and skill_match['match_score'] > 0)
+    if sought_support and not (_support_role(job.title) or technical_overlap):
+        relevant = False
+    if not relevant:
+        return {'match_score': 0, 'category': 'discarded', 'match_reasons': [],
+                'missed_reasons': ['A área profissional da vaga não corresponde ao perfil buscado.']}
+
     total_weight = sum(weight for weight, _ in components)
     score = round(sum(weight * value for weight, value in components) / total_weight) if total_weight else 0
     if minimum and float(job.salary_max or 0) == 0:

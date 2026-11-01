@@ -220,8 +220,8 @@ class _AutomationPanelState extends State<_AutomationPanel> {
 
   Widget _statusBadge(String label) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-    decoration: BoxDecoration(color: Colors.white.withValues(alpha: .12), borderRadius: BorderRadius.circular(20), border: Border.all(color: const Color(0xFFE7C36A).withValues(alpha: .5))),
-    child: Text(label, style: const TextStyle(color: Color(0xFFE7C36A), fontSize: 11, fontWeight: FontWeight.w800)),
+    decoration: BoxDecoration(color: Colors.white.withValues(alpha: .12), borderRadius: BorderRadius.circular(20), border: Border.all(color: const Color(0xFFBFDBFE).withValues(alpha: .5))),
+    child: Text(label, style: const TextStyle(color: Color(0xFFBFDBFE), fontSize: 11, fontWeight: FontWeight.w800)),
   );
 
   @override
@@ -230,10 +230,10 @@ class _AutomationPanelState extends State<_AutomationPanel> {
     final active = _activeRunId != null || _runStatus == 'running' || _runStatus == 'queued';
     return Padding(padding: const EdgeInsets.fromLTRB(20, 8, 20, 24), child: ListView(shrinkWrap: true, children: [
       Container(margin: const EdgeInsets.only(bottom: 16), padding: const EdgeInsets.all(20), decoration: BoxDecoration(
-        gradient: const LinearGradient(colors: [Brand.navy, Color(0xFF1E4864)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+        gradient: const LinearGradient(colors: [Brand.navy, Color(0xFF2563EB)], begin: Alignment.topLeft, end: Alignment.bottomRight),
         borderRadius: BorderRadius.circular(18),
       ), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [Container(width: 42, height: 42, decoration: BoxDecoration(color: Brand.coral.withValues(alpha: .18), borderRadius: BorderRadius.circular(12)), child: const Icon(Icons.radar, color: Color(0xFFE7C36A))), const SizedBox(width: 12), Expanded(child: Text('Central de Automação', style: Theme.of(context).textTheme.titleLarge?.copyWith(color: Colors.white, fontWeight: FontWeight.w800))), if (_busy) const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))]),
+        Row(children: [Container(width: 42, height: 42, decoration: BoxDecoration(color: Brand.coral.withValues(alpha: .18), borderRadius: BorderRadius.circular(12)), child: const Icon(Icons.radar, color: Color(0xFFBFDBFE))), const SizedBox(width: 12), Expanded(child: Text('Central de Automação', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700))), if (_busy) const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))]),
         const SizedBox(height: 12),
         Wrap(spacing: 8, runSpacing: 4, children: [
           _statusBadge(_premium ? 'VAGOU! PRO' : 'PLANO GRATUITO'),
