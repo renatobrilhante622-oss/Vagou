@@ -93,7 +93,7 @@ class _AutomationPanelState extends State<_AutomationPanel> {
         _latestRun = result;
         _progress = Map<String, dynamic>.from(result['progress'] as Map? ?? const {});
       });
-      if (status == 'complete' || status == 'failed') {
+      if (status == 'complete' || status == 'failed' || status == 'cancelled') {
         _activeRunId = null;
         _pollTimer?.cancel();
         await _loadEvents();
@@ -147,7 +147,7 @@ class _AutomationPanelState extends State<_AutomationPanel> {
   Future<void> _start() async {
     setState(() => _busy = true);
     try {
-      final response = await widget.api.request('POST', '/automation/run');
+      final response = await widget.api.request('POST', '/automation/run', {'consent_granted': _user['automation_enabled'] == true});
       _activeRunId = response['run_id']?.toString();
       _runStatus = 'queued';
       _progress = {};
@@ -186,7 +186,7 @@ class _AutomationPanelState extends State<_AutomationPanel> {
   int _count(String key) => ((_progress[key] ?? _latestRun[key]) as num? ?? 0).toInt();
 
   Future<void> _openEvent(Map event) async {
-    final link = event['job_url']?.toString();
+    final link = (event['external_url'] ?? event['job_url'])?.toString();
     final uri = link == null ? null : Uri.tryParse(link);
     if (uri != null && ['http', 'https'].contains(uri.scheme)) {
       try { await externalLink(link!); }
@@ -213,12 +213,14 @@ class _AutomationPanelState extends State<_AutomationPanel> {
     final reasons = List<String>.from(event['match_reasons'] as List? ?? const []);
     return Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text('${event['job_title'] ?? 'Oportunidade'}', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
-      Text('${event['company'] ?? 'Empresa não informada'} · ${event['location'] ?? 'Localização não informada'}'),
+      Text('${event['company_name'] ?? event['company'] ?? 'Empresa não informada'} · ${event['location'] ?? 'Localização não informada'}'),
       Wrap(spacing: 8, children: [
         if (event['match_score'] != null) Chip(label: Text('${event['match_score']}% de compatibilidade')),
         Chip(label: Text('${event['source_name'] ?? 'Vagou!'}')),
         Chip(label: Text(statusLabel('${event['status']}'))),
       ]),
+      if (event['destination_channel'] != null) Text('Canal de destino: ${const {'smtp': 'contato de recrutamento por e-mail', 'email': 'contato de recrutamento por e-mail', 'platform': 'recrutador no Vagou!', 'portal': 'portal oficial', 'portal_link': 'portal oficial', 'portal_search': 'pesquisa no portal', 'candidate_review': 'avaliação individual', 'existing_application': 'candidatura existente'}[event['destination_channel']] ?? 'consulte a vaga'}'),
+      if (event['delivery_status'] != null) Text(const {'pending': 'Notificação aguardando envio.', 'queued': 'Notificação na fila de envio.', 'sent': 'Mensagem aceita pelo servidor de e-mail.', 'smtp_accepted': 'Mensagem aceita pelo servidor de e-mail.', 'retrying': 'O envio da notificação será tentado novamente.', 'failed': 'A notificação não foi entregue; confira o relatório.', 'cancelled': 'Envio da notificação cancelado.', 'not_requested': 'Registro disponível no Vagou!.', 'requires_manual': 'Conclua a candidatura no portal oficial.'}[event['delivery_status']] ?? 'Consulte o relatório para acompanhar a notificação.'),
       if (reasons.isNotEmpty) Text(reasons.join(' · ')),
       Text('${event['detail'] ?? ''}'),
       TextButton.icon(onPressed: () => _openEvent(event), icon: const Icon(Icons.open_in_new), label: const Text('Candidatar-se / Abrir Vaga')),
@@ -248,7 +250,7 @@ class _AutomationPanelState extends State<_AutomationPanel> {
           if (active) _statusBadge('BUSCA EM ANDAMENTO'),
         ]),
         const SizedBox(height: 8),
-        const Text('A automação aplica em vagas internas compatíveis. Portais externos abrem para sua revisão e candidatura.', style: TextStyle(color: Colors.white70)),
+        const Text('A automação registra candidaturas compatíveis e encaminha o currículo quando houver contato de recrutamento. Alguns portais exigem concluir o processo no site oficial.', style: TextStyle(color: Colors.white70)),
       ])),
       Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [Icon(_premium ? Icons.workspace_premium : Icons.lock_outline, color: Brand.coral), const SizedBox(width: 10), Expanded(child: Text(_premium ? 'Premium Ativo' : 'Plano Gratuito', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800))), if (_busy) const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))]),
@@ -278,7 +280,7 @@ class _AutomationPanelState extends State<_AutomationPanel> {
             ('Coletadas', _count('collected_jobs'), Icons.travel_explore),
             ('Varridas', _count('scanned_jobs'), Icons.radar),
             ('Possíveis', _count('possible_match_jobs'), Icons.auto_awesome_outlined),
-            ('Enviadas', _count('submitted_applications'), Icons.send_outlined),
+            ('Registradas', _count('submitted_applications'), Icons.send_outlined),
           ];
           return Wrap(spacing: 8, runSpacing: 0, children: [for (final metric in metrics)
             SizedBox(width: (constraints.maxWidth - 8) / 2, child: Container(
@@ -297,6 +299,15 @@ class _AutomationPanelState extends State<_AutomationPanel> {
         const SectionTitle(title: 'Possíveis Matches (Próximas ao seu perfil)'),
         for (final event in _events.where((item) => item['status'] == 'possible_match').take(20)) _eventCard(Map<String, dynamic>.from(event as Map)),
         if (!_events.any((item) => item['status'] == 'possible_match')) const Panel(child: Text('Nenhuma vaga próxima ao perfil nesta execução.')),
+        if (_events.any((item) => item['status'] == 'search_channel')) ...[
+          const SectionTitle(title: 'Explorar canais regionais', subtitle: 'Links de busca com seus critérios. Não são anúncios confirmados nem candidaturas enviadas.'),
+          for (final event in _events.where((item) => item['status'] == 'search_channel')) Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('${event['source_name'] ?? 'Portal de vagas'}', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+            const SizedBox(height: 8), Text('${event['location'] ?? 'Região dos seus critérios'}'),
+            Text('${event['detail'] ?? 'Explore vagas diretamente no canal oficial.'}'),
+            TextButton.icon(onPressed: () => _openEvent(Map<String, dynamic>.from(event as Map)), icon: const Icon(Icons.open_in_new), label: const Text('Abrir busca no portal')),
+          ])),
+        ],
         const SectionTitle(title: 'Vagas descartadas'),
         for (final event in _events.where((item) => item['status'] == 'filtered').take(20)) _eventCard(Map<String, dynamic>.from(event as Map)),
         if (_runs.length > 1) Text('Há ${_runs.length} execuções recentes; o histórico completo também fica em Relatórios.'),

@@ -5,11 +5,15 @@ from unittest.mock import patch
 
 import httpx
 
-from app.collectors import collect_authorized_sources, collect_gupy, source_name
+from app.collectors import collect_authorized_sources, collect_gupy, source_name, regional_search_channels
+from app import collectors
 from app.job_sources import FeedError
 
 
 class CollectorTests(unittest.TestCase):
+    def setUp(self):
+        collectors._source_cache.clear()
+
     def test_source_labels_cover_known_portals_and_preserve_other_hosts(self):
         self.assertEqual(source_name('https://careers.gupy.io/jobs'), 'Gupy')
         self.assertEqual(source_name('https://jobs.example.org/feed'), 'jobs.example.org')
@@ -48,7 +52,7 @@ class CollectorTests(unittest.TestCase):
 
             with patch('app.collectors.httpx.AsyncClient', side_effect=factory):
                 source = await collect_gupy({'titles': ['Analista'], 'keywords': ['Python'],
-                    'locations': ['Brasília / DF']})
+                    'locations': ['Brasília / DF']}, api_url='https://api.partner.example/jobs')
             return source
 
         source = asyncio.run(scenario())
@@ -87,6 +91,30 @@ class CollectorTests(unittest.TestCase):
             return sources, failures
 
         sources, failures = asyncio.run(scenario())
-        self.assertEqual({source.name for source in sources}, {'Remotive', 'Arbeitnow'})
-        self.assertEqual(failures, 1)
-        self.assertTrue(all(source.jobs and source.auto_approve for source in sources))
+        self.assertEqual({source.name for source in sources}, {'Remotive', 'Arbeitnow', 'Jobicy', 'Canais regionais brasileiros'})
+        self.assertEqual(failures, 0)
+        self.assertTrue(all(source.jobs and source.auto_approve for source in sources if source.name in ['Remotive', 'Arbeitnow']))
+        regional = next(source for source in sources if source.search_channels)
+        self.assertFalse(regional.jobs)
+        self.assertEqual(len(regional.search_channels), 6)
+
+    def test_dead_gupy_api_is_never_called_by_default(self):
+        with patch('app.collectors.httpx.AsyncClient') as client:
+            source = asyncio.run(collect_gupy({'titles': ['Analista'], 'locations': ['Brasília / DF']}))
+        client.assert_not_called()
+        self.assertFalse(source.jobs)
+        self.assertEqual(source.search_channels[0].source_name, 'Gupy')
+        self.assertIn('google.com/search', source.search_channels[0].external_url)
+
+    def test_outage_still_provides_search_channels_without_fabricating_vacancies(self):
+        async def unavailable(*args, **kwargs):
+            raise httpx.ConnectError('provider unavailable')
+        with patch('app.collectors.collect_remotive', side_effect=unavailable), patch('app.collectors.collect_arbeitnow', side_effect=unavailable), patch('app.collectors.collect_jobicy', side_effect=unavailable):
+            sources, failures = asyncio.run(collect_authorized_sources([], [], 4096, 20,
+                preferences={'titles': ['Analista de Dados'], 'locations': ['Goiânia / GO']}))
+        self.assertEqual(failures, 3)
+        self.assertEqual(sum(len(source.jobs) for source in sources), 0)
+        channels = [channel for source in sources for channel in source.search_channels]
+        self.assertEqual({channel.source_name for channel in channels}, {'Gupy', 'LinkedIn', 'Indeed', 'InfoJobs', 'Vagas.com.br', 'Catho'})
+        self.assertTrue(all(channel.location == 'Goiânia / GO' and channel.query == 'Analista de Dados' for channel in channels))
+        self.assertTrue(all(channel.external_url.startswith('https://') and channel.destination_channel == 'portal_search' for channel in channels))

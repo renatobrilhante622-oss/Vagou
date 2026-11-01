@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, JSON, String, Text, Uuid, func
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Integer, JSON, String, Text, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -16,6 +16,8 @@ class AutomationRun(Base):
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     collected_jobs: Mapped[int] = mapped_column(Integer, default=0)
+    consent_granted: Mapped[bool] = mapped_column(Boolean, default=False, server_default='false')
+    search_channels_count: Mapped[int] = mapped_column(Integer, default=0, server_default='0')
     scanned_jobs: Mapped[int] = mapped_column(Integer, default=0)
     external_jobs_scanned: Mapped[int] = mapped_column(Integer, default=0)
     filtered_jobs: Mapped[int] = mapped_column(Integer, default=0)
@@ -44,4 +46,5 @@ class AutomationEvent(Base):
     source_name: Mapped[str | None] = mapped_column(String(120))
     match_score: Mapped[int | None] = mapped_column(Integer)
     match_reasons: Mapped[list | None] = mapped_column(JSON)
-    __table_args__ = (CheckConstraint("status IN ('submitted','already_applied','requires_manual','possible_match','missing_resume','filtered','failed')", name='ck_automation_event_status'),)
+    destination_channel: Mapped[str | None] = mapped_column(String(32))
+    __table_args__ = (CheckConstraint("status IN ('submitted','already_applied','requires_manual','possible_match','missing_resume','filtered','failed','limit_reached','search_channel')", name='ck_automation_event_status'),)

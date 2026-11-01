@@ -4,6 +4,8 @@ Supported formats are JSON `{jobs: [...]}`, RSS/Atom, and schema.org JobPosting
 JSON-LD. This module never sends candidate data or submits to external websites.
 Configure only sources whose terms permit reuse.
 """
+from email_validator import EmailNotValidError, validate_email
+
 import hashlib
 import ipaddress
 import json
@@ -99,6 +101,16 @@ def amount(value) -> float:
     return result
 
 
+def contact_email(value) -> str | None:
+    """Only provider-declared public recruitment contacts, never scraped addresses."""
+    if not isinstance(value, str):
+        return None
+    try:
+        return validate_email(value.strip(), check_deliverability=False).normalized
+    except EmailNotValidError:
+        return None
+
+
 @dataclass(frozen=True)
 class ExternalJob:
     source_external_id: str
@@ -112,6 +124,7 @@ class ExternalJob:
     salary_max: float
     contract_type: str | None
     source_url: str
+    contact_email: str | None = None
 
     def values(self):
         return asdict(self)
@@ -148,7 +161,7 @@ def parse_feed(data: dict, max_jobs: int = 200) -> list[ExternalJob]:
             identity = str(record.get('id') or hashlib.sha256(url.encode()).hexdigest())[:255]
             jobs.append(ExternalJob(identity, title, company, description,
                 plain(record.get('location') or record.get('candidate_required_location') or 'Não informada', 160),
-                modality, keywords, minimum, maximum, contract_type, url))
+                modality, keywords, minimum, maximum, contract_type, url, contact_email(record.get('contact_email') or record.get('recruiter_email'))))
         except (FeedError, ValueError, TypeError):
             continue
     return jobs
@@ -247,6 +260,8 @@ def parse_job_postings(html: str, page_url: str, max_jobs: int = 200) -> list[Ex
                 amount_value = salary.get('value', {}) if isinstance(salary, dict) else {}
                 minimum = amount(amount_value.get('minValue')) if isinstance(amount_value, dict) else amount(amount_value)
                 maximum = amount(amount_value.get('maxValue')) if isinstance(amount_value, dict) else minimum
+                if isinstance(salary, dict) and salary.get('currency') and str(salary['currency']).upper() != 'BRL':
+                    minimum = maximum = 0.0
                 identity = str(record.get('identifier', {}).get('value') or url)[:255]
                 contract = str(record.get('employmentType', '')).casefold()
                 contract = {'full_time': 'clt', 'part_time': 'clt', 'contractor': 'pj',
@@ -255,7 +270,7 @@ def parse_job_postings(html: str, page_url: str, max_jobs: int = 200) -> list[Ex
                 tags = tags if isinstance(tags, list) else [tags] if tags else []
                 jobs.append(ExternalJob(identity, title, company, description, location, modality,
                     sorted({plain(tag, 80).casefold() for tag in tags if plain(tag, 80)})[:100],
-                    minimum, maximum, contract, url))
+                    minimum, maximum, contract, url, contact_email(record.get('contact_email') or (organization.get('email') if isinstance(organization, dict) else None))))
             except (FeedError, TypeError, ValueError):
                 continue
             if len(jobs) >= max_jobs:

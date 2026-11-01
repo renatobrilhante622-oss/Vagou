@@ -135,6 +135,10 @@ class Preferences(StrictModel):
         return value
 
 
+class AutomationRunRequest(StrictModel):
+    consent_granted: bool
+
+
 class AutomationRunReport(StrictModel):
     id: UUID
     status: Literal['queued', 'running', 'complete', 'failed', 'cancelled']
@@ -147,6 +151,9 @@ class AutomationRunReport(StrictModel):
     possible_match_jobs: int = Field(default=0, ge=0)
     eligible_jobs: int = Field(default=0, ge=0)
     submitted_applications: int = Field(default=0, ge=0)
+    applications_submitted: int = Field(default=0, ge=0)
+    consent_granted: bool = False
+    search_channels_count: int = Field(default=0, ge=0)
     manual_review_jobs: int = Field(default=0, ge=0)
     error_count: int = Field(default=0, ge=0)
     omitted_events: int = Field(default=0, ge=0)
@@ -166,7 +173,7 @@ class AutomationEventReport(StrictModel):
     job_id: UUID | None = None
     job_title: str | None = None
     job_url: str | None = None
-    status: Literal['submitted', 'already_applied', 'requires_manual', 'possible_match', 'missing_resume', 'filtered', 'failed']
+    status: Literal['submitted', 'already_applied', 'requires_manual', 'possible_match', 'missing_resume', 'filtered', 'failed', 'limit_reached', 'search_channel']
     detail: str
     created_at: datetime
     company: str | None = None
@@ -174,6 +181,10 @@ class AutomationEventReport(StrictModel):
     source_name: str | None = None
     match_score: int | None = Field(default=None, ge=0, le=100)
     match_reasons: list[str] = Field(default_factory=list)
+    external_url: str | None = None
+    company_name: str | None = None
+    destination_channel: str | None = None
+    delivery_status: str | None = None
 
 
 class AutomationEventsReport(StrictModel):
@@ -185,6 +196,7 @@ class AutomationEventsReport(StrictModel):
 class JobCreate(StrictModel):
     title: str = Field(min_length=2, max_length=160)
     company: str = Field(min_length=2, max_length=160)
+    contact_email: EmailStr | None = None
     description: str = Field(min_length=30, max_length=30000)
     salary_min: float = Field(ge=0, le=1000000, allow_inf_nan=False)
     salary_max: float = Field(ge=0, le=1000000, allow_inf_nan=False)

@@ -6,4 +6,6 @@ __pycache__/
 *.db
 storage/
 .dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
 build/

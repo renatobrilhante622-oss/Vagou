@@ -230,8 +230,11 @@ async def matches(offset: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=
             continue
         skill_match = match(user.skills, job.keywords)
         preference_match = evaluate_job(job, user.skills, user.preferences or {})
+        if preference_match['category'] == 'discarded':
+            continue
         items.append({'job': PublicJobOut.model_validate(job).model_dump(mode='json'),
             **skill_match, 'match_score': preference_match['match_score'],
+            'category': 'high' if preference_match['category'] == 'strong' else 'observation',
             'match_reasons': preference_match['match_reasons'] + preference_match['missed_reasons']})
     return {'items': items, 'next_offset': offset + len(rows) if len(rows) == limit else None,
         'collector_status': collector_status}
@@ -265,7 +268,8 @@ async def applications(offset: int = Query(0, ge=0), limit: int = Query(20, ge=1
     return [{'id': a.id, 'job_id': j.id, 'job_title': j.title, 'candidate_id': a.candidate_id,
              'source': a.source, 'status': a.status, 'match_score': a.match_score, 'created_at': a.created_at, 'status_updated_at': a.status_updated_at,
              'company': j.company, 'job_url': j.source_url, 'job_path': f'/v1/jobs/{j.id}',
-             'source_name': j.source_name, 'candidate_name': candidate_name} for a, j, candidate_name in rows]
+             'source_name': j.source_name, 'candidate_name': candidate_name,
+             'delivery_status': a.delivery_status, 'destination_channel': a.destination_channel} for a, j, candidate_name in rows]
 
 
 @router.get('/applications/{application_id}/resume')
@@ -393,7 +397,7 @@ async def dashboard(user: User = Candidate, db: AsyncSession = DB):
     # Stream bounded batches instead of retaining the entire job catalog.
     result = await db.stream_scalars(select(Job).where(Job.active.is_(True), Job.moderation_status == 'approved').execution_options(yield_per=200))
     async for job in result:
-        if eligible(job, user.preferences) and match(user.skills, job.keywords)['category'] == 'observation':
+        if eligible(job, user.preferences) and evaluate_job(job, user.skills, user.preferences or {})['category'] == 'possible':
             observation += 1
     return {'total_applications': total, 'manual': sum(r[2] for r in rows if r[0] == 'manual'),
             'automatic': sum(r[2] for r in rows if r[0] == 'automatic'), 'observation_jobs': observation,

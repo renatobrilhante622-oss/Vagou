@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     allowed_origins: list[str] = []
     max_pdf_bytes: int = 5 * 1024 * 1024
     privacy_version: str = '2026-01'
+    public_api_url: str = ''
     smtp_host: str = ''
     smtp_port: int = Field(default=587, ge=1, le=65535)
     smtp_username: str = Field(default='', validation_alias=AliasChoices('SMTP_USER', 'SMTP_USERNAME', 'smtp_username'))

@@ -1,22 +1,32 @@
-"""Concurrent collection from the public Gupy API and approved job feeds."""
+"""Bounded public feeds plus honest regional search-channel recommendations."""
 import asyncio
 import hashlib
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from time import monotonic
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 import httpx
 
-from app.job_sources import ExternalJob, FeedError, amount, fetch_feed, parse_feed, plain, public_https_url
+from app.job_sources import ExternalJob, FeedError, amount, fetch_feed, parse_feed, plain, public_https_url, contact_email
+from app.matching import english_search_query
 
-GUPY_API_URL = 'https://portal.api.gupy.io/api/v1/jobs'
 REMOTIVE_API_URL = 'https://remotive.com/api/remote-jobs'
 ARBEITNOW_API_URL = 'https://www.arbeitnow.com/api/job-board-api'
+JOBICY_API_URL = 'https://jobicy.com/api/v2/remote-jobs'
 PUBLIC_SOURCE_CACHE_SECONDS = 90
 _source_cache = {}
 _cache_lock = asyncio.Lock()
+
+
+@dataclass(frozen=True)
+class SearchChannel:
+    source_name: str
+    external_url: str
+    query: str
+    location: str
+    destination_channel: str = 'portal_search'
 
 
 @dataclass(frozen=True)
@@ -24,6 +34,7 @@ class CollectedSource:
     name: str
     jobs: list[ExternalJob]
     auto_approve: bool = False
+    search_channels: list[SearchChannel] = field(default_factory=list)
 
 
 def source_name(url: str) -> str:
@@ -92,7 +103,7 @@ def parse_gupy_response(payload: dict, max_jobs: int = 20) -> list[ExternalJob]:
                 'temporary': 'temporary', 'temporário': 'temporary', 'apprentice': 'apprentice', 'aprendiz': 'apprentice'}.get(contract)
             identity = str(_first(record, 'id', 'jobId', default=hashlib.sha256(url.encode()).hexdigest()))[:255]
             jobs.append(ExternalJob(identity, title, company, description, location, modality,
-                keywords, minimum, maximum, contract, url))
+                keywords, minimum, maximum, contract, url, contact_email(record.get('contact_email') or record.get('recruiter_email'))))
         except (FeedError, TypeError, ValueError):
             continue
     return jobs
@@ -113,32 +124,63 @@ def gupy_search_params(preferences: dict) -> dict:
     return params
 
 
-async def collect_gupy(preferences: dict, max_jobs: int = 20) -> CollectedSource:
+def regional_search_channels(preferences: dict) -> list[SearchChannel]:
+    """Real search URLs, never fabricated vacancies or automatic submissions."""
+    titles = [str(value).strip() for value in preferences.get('titles', []) if str(value).strip()][:3]
+    keywords = [str(value).strip() for value in preferences.get('keywords', []) if str(value).strip()][:3]
+    queries = list(dict.fromkeys(' '.join(dict.fromkeys([title, *keywords]))[:180] for title in titles)) if titles else [' '.join(keywords) or 'vagas']
+    locations = [str(value).strip() for value in preferences.get('locations', []) if str(value).strip()][:3] or ['Brasil']
+    channels = []
+    portals = [('Gupy', 'gupy.io/jobs'), ('LinkedIn', 'linkedin.com/jobs'),
+               ('Indeed', 'br.indeed.com'), ('InfoJobs', 'infojobs.com.br'),
+               ('Vagas.com.br', 'vagas.com.br/vagas'), ('Catho', 'catho.com.br/vagas')]
+    for query in queries:
+        for location in locations:
+            for name, domain in portals:
+                if name == 'LinkedIn':
+                    url = 'https://www.linkedin.com/jobs/search/?' + urlencode({'keywords': query, 'location': location + ', Brasil'})
+                elif name == 'Indeed':
+                    url = 'https://br.indeed.com/jobs?' + urlencode({'q': query, 'l': location})
+                elif name == 'InfoJobs':
+                    url = 'https://www.infojobs.com.br/empregos.aspx?' + urlencode({'palabra': query, 'poblacion': location})
+                else:
+                    # A public, provider-scoped search avoids inventing private
+                    # APIs or relying on undocumented ATS routes that return404.
+                    url = 'https://www.google.com/search?' + urlencode({'q': f'site:{domain} {query} {location}'})
+                channels.append(SearchChannel(name, url, query, location))
+    return channels
+
+
+async def collect_gupy(preferences: dict, max_jobs: int = 20,
+                       api_url: str | None = None) -> CollectedSource:
+    """Optional explicitly supplied authorized endpoint; no defunct default API."""
+    if not api_url:
+        return CollectedSource('Gupy', [], search_channels=[channel for channel in regional_search_channels(preferences) if channel.source_name == 'Gupy'])
+    public_https_url(api_url)
     params = gupy_search_params(preferences)
     if not params['jobName']:
         return CollectedSource('Gupy', [])
     async with httpx.AsyncClient(timeout=httpx.Timeout(8.0), follow_redirects=False,
             headers={'Accept': 'application/json', 'User-Agent': 'Vagou-AuthorizedJobSearch/1.0'}) as client:
-        response = await client.get(GUPY_API_URL, params=params)
-        response.raise_for_status()
-        if len(response.content) > 2 * 1024 * 1024:
-            raise FeedError('A resposta pública da Gupy excedeu o limite de tamanho.')
-        try:
-            payload = response.json()
-        except ValueError:
-            raise FeedError('A API pública da Gupy retornou JSON inválido.') from None
+        payload = await _public_json(client, api_url, params)
     return CollectedSource('Gupy', parse_gupy_response(payload, max_jobs), auto_approve=True)
 
 
 async def _public_json(client: httpx.AsyncClient, url: str, params: dict | None = None,
                        max_bytes: int = 2 * 1024 * 1024) -> dict:
-    response = await client.get(url, params=params)
-    response.raise_for_status()
-    if len(response.content) > max_bytes:
-        raise FeedError('A fonte pública excedeu o limite de tamanho.')
+    body = bytearray()
+    async with client.stream('GET', url, params=params) as response:
+        response.raise_for_status()
+        content_type = response.headers.get('content-type', '').lower()
+        if 'application/json' not in content_type:
+            raise FeedError('A fonte pública não respondeu com JSON.')
+        async for chunk in response.aiter_bytes():
+            body.extend(chunk)
+            if len(body) > max_bytes:
+                raise FeedError('A fonte pública excedeu o limite de tamanho.')
     try:
-        result = response.json()
-    except ValueError:
+        result = json.loads(body)
+    except (ValueError, UnicodeDecodeError):
         raise FeedError('A fonte pública retornou JSON inválido.') from None
     if not isinstance(result, dict):
         raise FeedError('A fonte pública retornou um formato inesperado.')
@@ -146,14 +188,14 @@ async def _public_json(client: httpx.AsyncClient, url: str, params: dict | None 
 
 
 async def collect_remotive(preferences: dict, max_jobs: int = 20) -> CollectedSource:
-    query = ' '.join([*(preferences.get('titles') or []), *(preferences.get('keywords') or [])])[:180]
+    query = english_search_query(preferences)
     headers = {'Accept': 'application/json', 'User-Agent': 'Vagou-AuthorizedJobSearch/1.0'}
     async with httpx.AsyncClient(timeout=httpx.Timeout(8.0), follow_redirects=False, headers=headers) as client:
         payload = await _public_json(client, REMOTIVE_API_URL, {'search': query, 'limit': max_jobs})
     jobs = parse_feed({'jobs': payload.get('jobs', [])}, max_jobs=max_jobs)
     return CollectedSource('Remotive', [ExternalJob(job.source_external_id, job.title, job.company,
         job.description, job.location, 'remote', job.keywords, job.salary_min, job.salary_max,
-        job.contract_type, job.source_url) for job in jobs], auto_approve=True)
+        job.contract_type, job.source_url, job.contact_email) for job in jobs], auto_approve=True)
 
 
 async def collect_arbeitnow(preferences: dict, max_jobs: int = 20) -> CollectedSource:
@@ -179,6 +221,32 @@ async def collect_arbeitnow(preferences: dict, max_jobs: int = 20) -> CollectedS
     return CollectedSource('Arbeitnow', parse_feed({'jobs': normalized}, max_jobs=max_jobs), auto_approve=True)
 
 
+async def collect_jobicy(preferences: dict, max_jobs: int = 20) -> CollectedSource:
+    headers = {'Accept': 'application/json', 'User-Agent': 'Vagou-AuthorizedJobSearch/1.0'}
+    async with httpx.AsyncClient(timeout=httpx.Timeout(8.0), follow_redirects=False, headers=headers) as client:
+        payload = await _public_json(client, JOBICY_API_URL, {'count': min(max_jobs, 100)})
+    records = payload.get('jobs', [])
+    if not isinstance(records, list):
+        raise FeedError('A fonte Jobicy retornou uma lista inválida.')
+    normalized = []
+    for record in records[:max_jobs]:
+        if not isinstance(record, dict):
+            continue
+        currency = str(record.get('salaryCurrency') or '').upper()
+        normalized.append({
+            'id': record.get('id') or record.get('url'), 'url': record.get('url'),
+            'title': record.get('jobTitle'), 'company_name': record.get('companyName'),
+            'description': record.get('jobDescription') or record.get('jobExcerpt'),
+            'location': record.get('jobGeo') or 'Não informada', 'modality': 'remote',
+            # Industry labels are not verified technical competencies.
+            'tags': record.get('skills') or [],
+            'salary_min': record.get('salaryMin') if currency == 'BRL' else None,
+            'salary_max': record.get('salaryMax') if currency == 'BRL' else None,
+            'contact_email': record.get('contact_email') or record.get('recruiter_email'),
+        })
+    return CollectedSource('Jobicy', parse_feed({'jobs': normalized}, max_jobs=max_jobs), auto_approve=True)
+
+
 async def collect_authorized_sources(urls: list[str], allowed_hosts: list[str],
                                     max_bytes: int, max_jobs: int,
                                     concurrency: int = 4,
@@ -202,14 +270,15 @@ async def collect_authorized_sources(urls: list[str], allowed_hosts: list[str],
     if preferences:
         async def collect_builtin(collector):
             try:
-                return await collector(preferences, max_jobs=20)
+                return await collector(preferences, max_jobs=min(max_jobs, 50))
             except Exception:
                 return None
-        tasks.extend([collect_builtin(collect_gupy), collect_builtin(collect_remotive),
-            collect_builtin(collect_arbeitnow)])
+        tasks.extend([collect_builtin(collect_remotive), collect_builtin(collect_arbeitnow), collect_builtin(collect_jobicy)])
     results = await asyncio.gather(*tasks)
     sources = [result for result in results if result is not None]
     failures = len(results) - len(sources)
+    if preferences is not None:
+        sources.append(CollectedSource('Canais regionais brasileiros', [], search_channels=regional_search_channels(preferences)))
     async with _cache_lock:
         _source_cache[cache_key] = (monotonic() + PUBLIC_SOURCE_CACHE_SECONDS, sources, failures)
         for key, value in list(_source_cache.items()):

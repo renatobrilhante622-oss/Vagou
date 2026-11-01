@@ -55,6 +55,15 @@ def deliver_confirmation(recipient: str, code: str):
         f'Ele expira em {cfg.verification_expiry_minutes} minutos. '
         'Não compartilhe este código. Se você não solicitou o cadastro, ignore esta mensagem.\n'
     )
+    send_transactional_message(message)
+
+
+def send_transactional_message(message: EmailMessage) -> None:
+    """Send one prepared transactional message with the same verified TLS policy."""
+    if not email_configured():
+        logger.error('SMTP delivery_unavailable category=configuration')
+        raise RuntimeError('Email transport is not configured')
+    cfg = settings()
     connection = None
     phase = 'connecting'
     try:

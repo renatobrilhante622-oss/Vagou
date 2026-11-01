@@ -93,7 +93,10 @@ void main() {
           'preferences': {'titles': ['Analista'], 'locations': ['Recife / PE'], 'modalities': ['onsite']}});
       }
       if (request.url.path == '/v1/automation/runs') return jsonResponse({'items': []});
-      if (request.method == 'POST' && request.url.path == '/v1/automation/run') return jsonResponse({'run_id': runId});
+      if (request.method == 'POST' && request.url.path == '/v1/automation/run') {
+        expect(jsonDecode(request.body), {'consent_granted': true});
+        return jsonResponse({'run_id': runId});
+      }
       if (request.url.path == '/v1/automation/runs/$runId/status') {
         return jsonResponse({'id': runId, 'status': 'complete', 'collected_jobs': 12,
           'scanned_jobs': 8, 'external_jobs_scanned': 4, 'filtered_jobs': 5,
@@ -116,7 +119,22 @@ void main() {
 
     expect(requests, contains('POST /v1/automation/run'));
     expect(requests, contains('GET /v1/automation/runs/$runId/status'));
-    expect(find.textContaining('12 coletadas · 8 analisadas (4 externas) · 2 enviadas · 1 possíveis · 5 descartadas'), findsOneWidget);
+    // The executive dashboard presents separate metric cards, rather than a
+    // concatenated summary. Verify each displayed count and the detailed totals.
+    for (final metric in {'Coletadas': '12', 'Varridas': '8', 'Possíveis': '1', 'Registradas': '2'}.entries) {
+      await tester.scrollUntilVisible(find.text(metric.key), 200,
+          scrollable: find.byType(Scrollable).last);
+      await tester.ensureVisible(find.text(metric.key));
+      await tester.pumpAndSettle();
+      final column = tester.widget<Column>(find.byWidgetPredicate((widget) =>
+          widget is Column && widget.children.length == 2 &&
+          widget.children.last is Text && (widget.children.last as Text).data == metric.key));
+      expect((column.children.first as Text).data, metric.value);
+    }
+    await tester.scrollUntilVisible(find.text('4 externas analisadas · 5 descartadas'), 200,
+        scrollable: find.byType(Scrollable).last);
+    expect(find.text('4 externas analisadas · 5 descartadas'), findsOneWidget);
+    expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 }

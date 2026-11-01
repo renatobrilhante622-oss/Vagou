@@ -41,7 +41,7 @@ docs/OPERATIONS.md           # atualização, Gmail, moderação, fontes e relea
 
 - Cadastro com código de confirmação de seis dígitos por e-mail; login só após confirmar. Empresas fornecem CNPJ, razão social e contato, sem exigir domínio corporativo próprio.
 - Perfil com competências declaradas, telefone criptografado, currículo PDF privado, indicadores de preenchimento e preferências por salário, modalidade e cidade/UF.
-- Matching determinístico: alto acima de75%, observação50–75%, descartado abaixo de50%; não representa probabilidade de contratação e não infere competências de PDFs.
+- Matching determinístico e explicável: alto a partir de70%, observação40–69%, descartado abaixo de40%; não representa probabilidade de contratação e não infere competências de PDFs. Critérios obrigatórios incompatíveis, remuneração desconhecida quando há piso e competências inferidas do anúncio impedem candidatura automática.
 - Vagas novas moderadas antes de publicação. Empresas acompanham fila/status e candidaturas das próprias vagas.
 - Automação Premium opcional, com frequência/teto configuráveis, somente em vagas internas aprovadas; fontes externas autorizadas geram recomendações com ação manual no portal oficial.
 - Dashboard visual, histórico paginado, eventos detalhados de automação e cursos com modais de resumo, objetivos, impacto e CTA oficial. As regras de certificados variam por oferta; treinamento gratuito não equivale necessariamente a certificação profissional gratuita.

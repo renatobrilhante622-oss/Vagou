@@ -1,9 +1,59 @@
 """Deterministic, explainable matching; no inferred skills from untrusted PDF text."""
+import re
 import unicodedata
 
 
 def normalize(value: str) -> str:
     return ''.join(c for c in unicodedata.normalize('NFKD', value.casefold()) if not unicodedata.combining(c)).strip()
+
+
+# Exact vocabulary aliases, not substrings: Java remains distinct from JavaScript.
+_ALIASES = {
+    'engenheiro de software': 'developer', 'software engineer': 'developer',
+    'software developer': 'developer', 'desenvolvedor de software': 'developer',
+    'desenvolvedor': 'developer', 'desenvolvedora': 'developer', 'programador': 'developer',
+    'programadora': 'developer', 'analista de dados': 'data analyst',
+    'cientista de dados': 'data scientist', 'engenheiro de dados': 'data engineer',
+    'analista': 'analyst', 'dados': 'data', 'desenvolvimento': 'development',
+    'atendimento ao cliente': 'customer support', 'customer service': 'customer support',
+    'suporte ao cliente': 'customer support', 'atendimento': 'customer support',
+    'recursos humanos': 'human resources', 'gestao de projetos': 'project management',
+    'gestao': 'management', 'vendas': 'sales', 'vendedor': 'sales',
+    'gerente': 'manager', 'administrativo': 'administrative', 'assistente': 'assistant',
+    'programacao em python': 'python', 'programacao python': 'python',
+    'js': 'javascript', 'node.js': 'nodejs', 'node js': 'nodejs',
+    'postgres': 'postgresql', 'k8s': 'kubernetes', 'planilhas': 'excel',
+}
+_STOPWORDS = {'de', 'do', 'da', 'dos', 'das', 'em', 'e', 'the', 'of', 'and', 'a', 'o'}
+_KNOWN_SKILLS = ('python', 'javascript', 'java', 'sql', 'postgresql', 'docker',
+    'kubernetes', 'excel', 'sales', 'customer support', 'human resources', 'nodejs',
+    'typescript', 'react', 'angular', 'flutter', 'dart', 'c#', 'c++', 'aws', 'azure')
+
+
+def canonical_text(value: str) -> str:
+    result = normalize(value)
+    for phrase, canonical in sorted(_ALIASES.items(), key=lambda item: len(item[0]), reverse=True):
+        result = re.sub(r'(?<!\w)' + re.escape(phrase) + r'(?!\w)', canonical, result)
+    return ' '.join(result.split())
+
+
+def text_contains(text: str, term: str) -> bool:
+    return bool(re.search(r'(?<!\w)' + re.escape(canonical_text(term)) + r'(?!\w)', canonical_text(text)))
+
+
+def title_matches(title: str, requested: str) -> bool:
+    wanted = [token for token in canonical_text(requested).split() if token not in _STOPWORDS]
+    actual = canonical_text(title)
+    return bool(wanted) and all(text_contains(actual, token) for token in wanted)
+
+
+def english_search_query(preferences: dict) -> str:
+    values = [*(preferences.get('keywords') or []), *(preferences.get('titles') or [])]
+    for value in values:
+        for skill in _KNOWN_SKILLS:
+            if text_contains(value, skill):
+                return skill
+    return canonical_text(str(values[0]))[:100] if values else ''
 
 
 def location_key(value: str) -> str:
@@ -17,23 +67,35 @@ def location_matches(job_location: str, preferred_location: str) -> bool:
 
 def remote_region_allowed(job_location: str) -> bool:
     scope = normalize(job_location)
-    if not scope or any(term in scope for term in ('worldwide', 'anywhere', 'global', 'qualquer lugar', 'todo o mundo')):
+    if not scope or any(term in scope for term in ('worldwide', 'anywhere', 'global', 'qualquer lugar', 'todo o mundo', 'latin america', 'latam', 'south america', 'america latina', 'america do sul', 'americas')):
         return True
     if any(term in scope for term in ('brasil', 'brazil')):
         return True
     foreign_regions = ('united states', 'usa', 'u.s.', 'canada', 'europe', 'european',
         'united kingdom', 'uk ', 'australia', 'singapore', 'mexico', 'saudi arabia',
         'germany', 'france', 'spain', 'portugal', 'india', 'asia', 'africa')
-    return not any(term in scope for term in foreign_regions)
+    if any(term in scope for term in foreign_regions) or scope in {'uk', 'us', 'eu', 'ca'}:
+        return False
+    brazilian_locations = ('sao paulo', 'rio de janeiro', 'brasilia', 'goiania',
+        'recife', 'salvador', 'belo horizonte', 'fortaleza', 'curitiba', 'porto alegre',
+        'manaus', 'belem', 'vitoria', 'florianopolis', 'natal', 'joao pessoa', 'maceio',
+        'aracaju', 'teresina', 'sao luis', 'palmas', 'cuiaba', 'campo grande', 'boa vista',
+        'rio branco', 'porto velho', 'macapa', 'campinas', 'santos', 'niteroi',
+        'acre', 'alagoas', 'amapa', 'amazonas', 'bahia', 'ceara', 'distrito federal',
+        'espirito santo', 'goias', 'maranhao', 'mato grosso', 'minas gerais', 'para',
+        'paraiba', 'parana', 'pernambuco', 'piaui', 'rio grande', 'rondonia', 'roraima',
+        'santa catarina', 'sergipe', 'tocantins')
+    return any(re.search(r'(?<!\w)' + re.escape(place) + r'(?!\w)', scope)
+        for place in brazilian_locations)
 
 
 def match(skills: list[str], required: list[str]) -> dict:
-    available = {normalize(x) for x in skills}
-    requirements = {normalize(x) for x in required if normalize(x)}
+    available = {canonical_text(x) for x in skills}
+    requirements = {canonical_text(x) for x in required if normalize(x)}
     missing = sorted(requirements - available)
     score = round(100 * len(requirements & available) / len(requirements)) if requirements else 0
-    # 75 is observation: high strictly exceeds 75; 50 is inclusive.
-    category = 'high' if score > 75 else 'observation' if score >= 50 else 'discarded'
+    # Automation contract: >=70 submits, 40–69 are possible matches.
+    category = 'high' if score >= 70 else 'observation' if score >= 40 else 'discarded'
     return {'match_score': score, 'category': category, 'missing_skills': missing}
 
 
@@ -43,8 +105,13 @@ def evaluate_job(job, skills: list[str], preferences: dict) -> dict:
     reasons = []
     missed = []
 
-    skill_match = match(skills, job.keywords or [])
-    if job.keywords:
+    requirements = list(job.keywords or [])
+    inferred = not requirements
+    if inferred:
+        searchable_skills = ' '.join([job.title, job.description])
+        requirements = [skill for skill in _KNOWN_SKILLS if text_contains(searchable_skills, skill)]
+    skill_match = match(skills, requirements)
+    if requirements:
         components.append((0.35, skill_match['match_score']))
         if skill_match['match_score'] == 100:
             reasons.append('Competências compatíveis com os requisitos da vaga.')
@@ -53,18 +120,23 @@ def evaluate_job(job, skills: list[str], preferences: dict) -> dict:
             missed.append('Competências pendentes: ' + ', '.join(skill_match['missing_skills'][:5]))
         else:
             missed.append('Poucas competências coincidem com os requisitos da vaga.')
+    else:
+        components.append((0.35, 0))
+        missed.append('A fonte não informou competências suficientes para confirmar o match.')
+    if inferred:
+        missed.append('Competências inferidas do texto; confirme os requisitos no anúncio oficial.')
 
     titles = preferences.get('titles') or []
     if titles:
-        title_match = any(normalize(title) in normalize(job.title) for title in titles)
+        title_match = any(title_matches(job.title, title) for title in titles)
         components.append((0.20, 100 if title_match else 0))
         (reasons if title_match else missed).append(
             'Cargo compatível com sua busca.' if title_match else 'Cargo diferente dos títulos selecionados.')
 
-    keywords = [normalize(value) for value in preferences.get('keywords', []) if normalize(value)]
+    keywords = [canonical_text(value) for value in preferences.get('keywords', []) if normalize(value)]
     if keywords:
-        searchable = normalize(' '.join([job.title, job.description, *(job.keywords or [])]))
-        covered = sum(keyword in searchable for keyword in keywords)
+        searchable = canonical_text(' '.join([job.title, job.description, *(job.keywords or [])]))
+        covered = sum(text_contains(searchable, keyword) for keyword in keywords)
         components.append((0.15, round(100 * covered / len(keywords))))
         (reasons if covered else missed).append(
             f'{covered}/{len(keywords)} palavras-chave encontradas.' if covered else 'Nenhuma palavra-chave selecionada foi encontrada.')
@@ -104,7 +176,18 @@ def evaluate_job(job, skills: list[str], preferences: dict) -> dict:
 
     total_weight = sum(weight for weight, _ in components)
     score = round(sum(weight * value for weight, value in components) / total_weight) if total_weight else 0
-    category = 'strong' if score >= 70 and skill_match['match_score'] > 75 else 'possible' if score >= 40 else 'discarded'
+    if minimum and float(job.salary_max or 0) == 0:
+        score = min(score, 69)  # Unknown remuneration cannot authorize a paid-range submission.
+    if inferred:
+        score = min(score, 69)  # An unconfirmed skill mention never auto-submits.
+    incompatible = filter_reason(job, preferences)
+    if incompatible:
+        # High skill overlap never overrides an explicit location, modality,
+        # salary, title, keyword or contract restriction chosen by the user.
+        score = min(score, 69)
+        if incompatible not in missed:
+            missed.append(incompatible)
+    category = 'strong' if score >= 70 else 'possible' if score >= 40 else 'discarded'
     return {'match_score': score, 'category': category, 'match_reasons': reasons, 'missed_reasons': missed}
 
 
@@ -114,19 +197,21 @@ def eligible(job, preferences: dict) -> bool:
 
 def filter_reason(job, preferences: dict) -> str | None:
     preferences = preferences or {}
-    if float(job.salary_max) < preferences.get('min_salary', 0):
+    if float(job.salary_max or 0) > 0 and float(job.salary_max) < preferences.get('min_salary', 0):
         return 'Salário abaixo do piso definido.'
+    if preferences.get('max_salary') is not None and float(getattr(job, 'salary_min', 0) or 0) > preferences['max_salary']:
+        return 'Salário acima do teto definido.'
     if preferences.get('modalities') and job.modality not in preferences['modalities']:
         return 'Modalidade não selecionada.'
-    if preferences.get('titles') and not any(normalize(t) in normalize(job.title) for t in preferences['titles']):
+    if preferences.get('titles') and not any(title_matches(job.title, t) for t in preferences['titles']):
         return 'Cargo fora dos títulos desejados.'
     contract_types = preferences.get('contract_types') or []
     if contract_types and getattr(job, 'contract_type', None) not in contract_types:
         return 'Tipo de contrato não selecionado.'
-    keywords = [normalize(value) for value in preferences.get('keywords', []) if normalize(value)]
+    keywords = [canonical_text(value) for value in preferences.get('keywords', []) if normalize(value)]
     if keywords:
-        searchable = normalize(' '.join([job.title, job.description, *(job.keywords or [])]))
-        if not any(keyword in searchable for keyword in keywords):
+        searchable = canonical_text(' '.join([job.title, job.description, *(job.keywords or [])]))
+        if not any(text_contains(searchable, keyword) for keyword in keywords):
             return 'Palavras-chave não encontradas.'
     if preferences.get('locations'):
         location_match = any(location_matches(job.location, value) for value in preferences['locations'])

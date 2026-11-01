@@ -15,6 +15,13 @@ from app.config import settings
 from app.models import EmailOutbox, EmailVerification, User
 from app.smtp_transport import deliver_confirmation, email_configured
 
+# Application/report notifications share the public mail-service boundary.
+from app.application_mail import (process_application_outbox, queue_application_email,
+                                  queue_round_report)
+
+__all__ = ['process_email_outbox', 'process_application_outbox',
+           'queue_application_email', 'queue_round_report']
+
 logger = logging.getLogger('uvicorn.error')
 
 

@@ -55,6 +55,7 @@ class Job(Base):
     source_url: Mapped[str | None] = mapped_column(Text)
     source_external_id: Mapped[str | None] = mapped_column(String(255))
     source_name: Mapped[str] = mapped_column(String(120), default='Vagou!', server_default='Vagou!')
+    contact_email: Mapped[str | None] = mapped_column(String(254))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
     __table_args__ = (
         CheckConstraint('salary_min >= 0 AND salary_max >= salary_min'),
@@ -72,12 +73,14 @@ class Application(Base):
     source: Mapped[str] = mapped_column(String(16))
     status: Mapped[str] = mapped_column(String(24), default='submitted')
     match_score: Mapped[int] = mapped_column(Integer)
+    delivery_status: Mapped[str] = mapped_column(String(24), default='not_requested', server_default='not_requested')
+    destination_channel: Mapped[str | None] = mapped_column(String(32))
     status_updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     __table_args__ = (
         UniqueConstraint('candidate_id', 'job_id', name='uq_application_candidate_job'),
         CheckConstraint("source IN ('manual','automatic')"),
-        CheckConstraint("status IN ('submitted','reviewing','interview','rejected','hired')"),
+        CheckConstraint("status IN ('submitted','reviewing','interview','rejected','hired','requires_manual')", name='ck_application_status'),
         CheckConstraint('match_score BETWEEN 0 AND 100'),
     )
 
@@ -104,3 +107,24 @@ class EmailOutbox(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     __table_args__ = (CheckConstraint("status IN ('pending','sent','cancelled','failed')", name='ck_email_outbox_status'),)
+
+
+class ApplicationNotification(Base):
+    __tablename__ = 'application_notifications'
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('users.id', ondelete='CASCADE'), index=True)
+    application_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey('applications.id', ondelete='CASCADE'))
+    run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('automation_runs.id', ondelete='CASCADE'), index=True)
+    kind: Mapped[str] = mapped_column(String(32))
+    recipient_encrypted: Mapped[str] = mapped_column(Text)
+    payload_encrypted: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(16), default='pending', index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    dedup_key: Mapped[str] = mapped_column(String(255))
+    __table_args__ = (
+        UniqueConstraint('dedup_key', name='uq_application_notifications_dedup'),
+        CheckConstraint("status IN ('pending','sent','failed','cancelled')", name='ck_application_notification_status'),
+    )

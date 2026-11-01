@@ -10,7 +10,7 @@ docker compose run --rm migrate
 docker compose up -d api worker beat
 ```
 
-A migração vai de `0001` a `0008`; as últimas versões adicionam contrato opcional às vagas e evidências/contagens explicáveis de automação. A `0002` exige confirmação de e-mail também das contas antigas: no próximo login, solicitar novo código e confirmar. Vagas anteriores à migração permanecem aprovadas; toda vaga nova entra em moderação. Recrutadores antigos têm campos empresariais nulos preservados, sem criar CNPJ fictício. Novos cadastros empresariais exigem CNPJ válido, razão social, e-mail e telefone. A validação de CNPJ verifica formato/dígitos (inclusive alfanumérico), não consulta a situação cadastral na Receita Federal.
+A migração vai de `0001` a `0009`; as últimas versões adicionam contrato opcional às vagas e evidências/contagens explicáveis de automação. A `0009` adiciona contato opcional da vaga, canal/status de entrega, consentimento da rodada e outbox transacional criptografada. A `0002` exige confirmação de e-mail também das contas antigas: no próximo login, solicitar novo código e confirmar. Vagas anteriores à migração permanecem aprovadas; toda vaga nova entra em moderação. Recrutadores antigos têm campos empresariais nulos preservados, sem criar CNPJ fictício. Novos cadastros empresariais exigem CNPJ válido, razão social, e-mail e telefone. A validação de CNPJ verifica formato/dígitos (inclusive alfanumérico), não consulta a situação cadastral na Receita Federal.
 
 A migração de downgrade para antes de `0002` elimina vagas externas que não cabem no esquema antigo. Não faça downgrade com dados de produção sem um plano de restauração.
 
@@ -18,7 +18,7 @@ A migração de downgrade para antes de `0002` elimina vagas externas que não c
 
 1. Na conta Google que enviará os códigos, ative a verificação em duas etapas.
 2. Crie uma **senha de app** quando esse recurso estiver disponível para a conta. Não use a senha normal do Google.
-3. Configure somente no `backend/.env` já usado pelo Compose ou no gerenciador de segredos do servidor:
+3. Configure no arquivo privado ignorado `backend/.env.smtp.local` ou no gerenciador de segredos do servidor:
 
 | Variável | Configuração |
 |---|---|
@@ -34,7 +34,7 @@ A migração de downgrade para antes de `0002` elimina vagas externas que não c
 
 Não cole senhas no chat, GitHub, logs ou arquivos versionados. A senha de app é usada pelo processo SMTP; não é um token de proxy HTTP. A rede do servidor precisa permitir SMTP com TLS para `smtp.gmail.com:587`. Não há alteração automática de firewall ou rede nesta implementação. A conta Gmail está sujeita às cotas/restrições do provedor; a equipe deve acompanhar falhas de entrega. Se a conta não disponibilizar senhas de app, será necessário outro serviço SMTP compatível autenticado e com TLS.
 
-Recrie API, worker e beat após alterar as variáveis para aplicar a configuração. O Compose já carrega `backend/.env` nesses serviços; não é preciso editar sua estrutura.
+Recrie API, worker e beat após alterar as variáveis para aplicar a configuração. Use o overlay `compose.smtp.yaml` para injetar o arquivo privado nesses serviços.
 
 ### Confirmar envio real
 
@@ -45,7 +45,7 @@ Recrie API, worker e beat após alterar as variáveis para aplicar a configuraç
 - Sem SMTP, o cadastro retorna `configuration_required`. Depois de configurar, solicite novo código. Não há código universal, confirmação automática, OTP em respostas públicas ou bypass de produção.
 - SMTP aplica TLS com validação de certificado e retries limitados. Após entrega/falha final/cancelamento, o payload do código é limpo. As falhas não registram senhas ou código nos logs.
 
-O envio do Gmail **não foi testado com uma conta real nesta sessão**, pois as credenciais ainda não foram configuradas. Os testes unitários de transporte usam mocks para verificar autenticação, TLS e propagação de falhas; não equivalem a uma entrega real.
+Os testes de transporte usam mocks para verificar autenticação, TLS e propagação de falhas; não equivalem a uma entrega real. Os testes integrados verificam persistência, criptografia, anexos e retentativas no PostgreSQL, substituindo somente a conexão SMTP. A confirmação de recebimento no Gmail exige uma rodada autorizada no ambiente configurado.
 
 ## Moderação
 
@@ -61,25 +61,34 @@ A operação de moderação pode ser feita pela API autenticada/Swagger por uma 
 
 ## Fontes externas e automação Premium
 
-A importação externa é desativada por padrão. Configure apenas canais cuja API e termos permitam essa integração:
+A importação pública é controlada por `ENABLE_PUBLIC_COLLECTORS` (ativada por padrão). Configure fontes adicionais apenas quando sua API e termos permitirem essa integração:
 
 - `JOB_SOURCE_URLS`: lista JSON de endpoints HTTPS, sem credenciais na URL.
 - `JOB_SOURCE_ALLOWED_HOSTS`: lista JSON dos hostnames exatos autorizados.
 - `JOB_SOURCE_AUTO_APPROVE=false`: mantém anúncios importados na moderação. Só habilitar aprovação automática para fonte previamente confiável e autorizada.
 - Limites: `JOB_SOURCE_MAX_BYTES=2097152`, `JOB_SOURCE_MAX_JOBS=200` por leitura.
 
-O conector aceita JSON `jobs`, RSS/Atom e JSON-LD `schema.org/JobPosting` em hosts allowlisted. Além disso, a busca imediata consulta o endpoint público da Gupy com cargo/palavras-chave e Cidade/UF do candidato. Anúncios Gupy mantêm o URL oficial e são aprovados como fonte pública; feeds administrativos seguem `JOB_SOURCE_AUTO_APPROVE`. Não se infere salário BRL de texto em moeda estrangeira; sem valor estruturado, o salário é desconhecido. Não adicionar fontes sem autorização/termos compatíveis.
+O conector aceita JSON `jobs`, RSS/Atom e JSON-LD `schema.org/JobPosting` em hosts allowlisted. A busca imediata consulta Remotive, Arbeitnow e Jobicy, preservando anúncio, empresa, região e URL oficiais. O endpoint Gupy que retornava 404 foi removido das fontes padrão; uma integração Gupy só consulta uma URL explicitamente fornecida. Feeds administrativos seguem `JOB_SOURCE_AUTO_APPROVE`. Não se infere salário BRL de moeda estrangeira; sem valor estruturado confiável, o salário é desconhecido.
+
+O fallback regional oferece links de pesquisa dinâmicos para Gupy, LinkedIn, Indeed, InfoJobs, Vagas.com e Catho, combinando cargo, palavras-chave e Cidade/UF. São eventos `search_channel`, contados em `search_channels_count`, sem anúncio inventado nem percentual de match. Se fontes estiverem indisponíveis, pode haver zero vagas reais e ainda assim canais úteis para pesquisa; esses links nunca incrementam vagas analisadas ou candidaturas.
 
 As fontes exigem HTTPS e allowlist administrativa, não seguem redirects e têm timeout/tamanho limitados. A rede deve continuar aplicando proteção de egress contra resolução de destinos privados; não conceder edição dessa allowlist a candidatos.
 
-Uma varredura iniciada pelo candidato reconsulta feeds configurados em `JOB_SOURCE_URLS`, em paralelo, com hosts exatos em `JOB_SOURCE_ALLOWED_HOSTS`; erros por fonte não cancelam as demais. Feeds não aprovados ficam pendentes. O sistema não raspa portais fechados nem envia currículos/e-mails a recrutadores; vagas externas aparecem com link oficial para revisão e candidatura manual.
+Uma varredura iniciada pelo candidato reconsulta feeds configurados em `JOB_SOURCE_URLS`, em paralelo, com hosts exatos em `JOB_SOURCE_ALLOWED_HOSTS`; erros por fonte não cancelam as demais. Feeds não aprovados ficam pendentes. O sistema não raspa portais fechados. Só encaminha currículo ao contato explícito validado da vaga ou ao recrutador proprietário com e-mail confirmado, mediante autorização do candidato.
 
 `PREMIUM_TEST_EMAILS` é uma lista separada por vírgula ou ponto e vírgula. A configuração padrão inclui `rbrilhante001@gmail.com`; qualquer conta listada recebe acesso Premium independente de `APP_ENV`, inclusive em produção. Configure essa allowlist somente com contas de teste autorizadas e remova acessos que não devam permanecer ativos. A API mostra o entitlement em `GET /v1/candidate/entitlements`; a execução imediata usa `POST /v1/automation/run`, que retorna `run_id`, acompanhado por `GET /v1/automation/runs/{run_id}/status`.
 
 O beat verifica fontes a cada 15 minutos e candidaturas elegíveis a cada minuto, mas cada candidato tem intervalo próprio entre 15 minutos e um dia (padrão uma hora). São necessários conta confirmada, Premium, currículo e autorização explícita. O teto real é o menor entre a preferência do candidato e `AUTOMATION_MAX_APPLICATIONS_PER_RUN` (padrão 20).
 
 - **Vaga interna aprovada:** a candidatura é entregue ao recrutador dentro do Vagou!, com unicidade por candidato/vaga e registro `submitted`.
-- **Vaga externa:** o canal oficial precisa ser aberto pelo candidato. O evento é `requires_manual`; não se conta um link aberto como envio. A implementação não envia formulários a LinkedIn, Gupy ou outros portais sem APIs e permissões desses provedores.
+- **Vaga externa com contato:** a candidatura é registrada em `requires_manual`, com `delivery_status=queued` e `destination_channel=email`. Após aceite SMTP, passa a `submitted` e `delivery_status=sent`. Isso confirma o encaminhamento por e-mail, sem afirmar inscrição no ATS externo ou leitura pelo recrutador.
+- **Vaga externa sem contato:** a candidatura fica registrada em `requires_manual`, com link oficial para conclusão pelo candidato. Não se conta um link aberto como envio. A implementação não envia formulários a portais sem APIs e permissões desses provedores.
+
+`POST /v1/automation/run` aceita `{"consent_granted":true}`; clientes antigos podem omitir o corpo quando já existe autorização salva em `automation_enabled`. Uma recusa explícita bloqueia a execução. Matches com score a partir de70 geram registros, respeitando o teto configurado e a unicidade; scores40–69 ficam em possíveis matches. Cargo/skills PT-BR e inglês são normalizados com aliases; remoto mundial/Brasil/América Latina pode atender a uma cidade brasileira. Restrições incompatíveis, salário desconhecido com piso exigido e competências inferidas impedem envio automático. A varredura continua examinando as páginas seguintes mesmo após atingir o limite de candidaturas.
+
+`submitted_applications` e seu alias `applications_submitted` contam registros criados na rodada, exibidos como **Registradas**. Canal e status de entrega distinguem registro, fila e aceite SMTP. Eventos incluem `source_name`, `external_url`, `match_score`, `match_reasons`, `company_name`, `location` e `destination_channel`. A criação da candidatura, o relatório e a intenção de envio são confirmados na mesma transação; falhas SMTP não desfazem o registro.
+
+O worker agenda `vagou.deliver_application_mail` após o commit; o beat também verifica a outbox a cada15 segundos. O relatório executivo do candidato inclui candidaturas registradas, possíveis matches e links clicáveis. Configure `PUBLIC_API_URL` com a origem HTTPS pública para links de vagas internas em e-mails; anúncios externos preservam a URL oficial. A outbox deduplica por candidatura/rodada, usa Message-ID estável, limita a cinco tentativas e elimina payloads privados após entrega/falha final/cancelamento. A entrega SMTP tem semântica de pelo menos uma vez: uma perda de conexão após aceite pode gerar repetição. Revogar autorização, excluir a conta ou invalidar o currículo cancela o envio pendente.
 
 `GET /v1/automation/runs` entrega resumos privados paginados; `/runs/{id}/status` informa estado e progresso; `/runs/{id}/events` entrega eventos paginados, status, score, razões, fonte e link. Os eventos podem ser filtrados por `status=possible_match`. Cada ciclo armazena até 200 eventos detalhados e informa `omitted_events`; os totais distinguem anúncios coletados, vagas externas aprovadas/varridas, possíveis matches e descartes. Defina rotina operacional de retenção/expurgo de relatórios conforme a política de privacidade e volume real. Remoção de conta elimina seus relatórios em cascata.
 
@@ -92,14 +101,14 @@ O workflow usa Flutter 3.35.7, instala explicitamente API36 e `platform-tools` s
 - Em commits da `main`: `Actions → Build Android APK → execução → Artifacts → vagou-release-apk`. O GitHub empacota esse download como ZIP mesmo contendo um único APK; `compression-level: 0` evita compressão desnecessária.
 - Em tags `v*`: após build bem-sucedido, o job `publish-apk` publica `app-release.apk` como asset de uma GitHub Release, permitindo download direto do APK. O token tem escrita apenas nesse job. Crie a tag somente quando desejar publicar a versão. Se a release já existir, revise a execução e publique o asset conscientemente; o comando não sobrescreve releases antigas automaticamente.
 
-O APK interno mantém a assinatura de debug usada no template anterior. Para Google Play é obrigatória assinatura de produção/Play App Signing e configuração de release própria; isso não é inventado nesta atualização. O SDK de Flutter/Android não está instalado nesta máquina e o proxy impede sua instalação; o build efetivo depende da execução do workflow.
+O APK interno mantém a assinatura de debug usada no template anterior. Para Google Play é obrigatória assinatura de produção/Play App Signing e configuração de release própria. A análise e os testes locais usam Flutter3.35.7; a geração final do APK é validada pelo workflow Android com SDK36.
 
 ## Testes
 
 Na pasta `backend`, após instalar `requirements.txt` e migrar um banco descartável:
 
 ```bash
-python -m unittest discover -s tests -v
+python -m pytest -q
 ```
 
 Sem `VAGOU_TEST_URL`, os testes integrados são explicitamente ignorados. O CI backend usa PostgreSQL/Redis descartáveis e `MODERATOR_EMAILS=["moderator-ci@example.com"]`. Os testes leem a outbox apenas desse banco de testes para confirmar OTP, sem endpoint de bypass e sem imprimir o código. Não use a suíte contra produção.
@@ -121,7 +130,8 @@ A configuração privada de SMTP deve ficar em `backend/.env.smtp.local`, ignora
 O backend resolve seus arquivos dotenv a partir da pasta do próprio backend, independente do diretório de execução. `VAGOU_ENV_FILE` permite selecionar outro arquivo; os testes usam `/dev/null` para não ler credenciais privadas. Para passar o arquivo privado aos contêineres sem alterar as redes, portas ou variáveis existentes do banco:
 
 ```bash
-docker compose -f compose.yaml -f compose.smtp.yaml up -d --build api worker beat
+docker compose --env-file backend/.env.smtp.local -f compose.yaml -f compose.smtp.yaml up -d --build api worker beat
+docker compose exec api alembic upgrade head
 ```
 
 O arquivo privado precisa existir na máquina que executa esse comando. Arquivos privados criados no ambiente de desenvolvimento em nuvem não são enviados ao GitHub nem ao seu computador. `.dockerignore` impede que arquivos dotenv reais sejam incorporados às imagens. O overlay injeta as variáveis somente em tempo de execução.

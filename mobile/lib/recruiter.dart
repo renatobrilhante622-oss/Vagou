@@ -127,8 +127,8 @@ class _JobEditorState extends State<JobEditor> {
     field(title, 'Título do cargo'), field(description, 'Descrição, responsabilidades e requisitos', lines: 6, validator: (v) => (v?.trim().length ?? 0) < 30 ? 'Descreva a vaga com pelo menos 30 caracteres.' : null),
     field(min, 'Salário mínimo (R\$)', type: const TextInputType.numberWithOptions(decimal: true), validator: (v) => (double.tryParse((v ?? '').replaceAll(',', '.')) ?? -1) < 0 ? 'Informe um valor válido.' : null),
     field(max, 'Salário máximo (R\$)', type: const TextInputType.numberWithOptions(decimal: true), validator: (v) { final value = double.tryParse((v ?? '').replaceAll(',', '.')); final low = double.tryParse(min.text.replaceAll(',', '.')) ?? 0; return value == null || value < low ? 'O máximo deve ser maior ou igual ao mínimo.' : null; }),
-    DropdownButtonFormField<String>(initialValue: modality, decoration: const InputDecoration(labelText: 'Modalidade'), items: const [DropdownMenuItem(value: 'remote', child: Text('Remoto')), DropdownMenuItem(value: 'hybrid', child: Text('Híbrido')), DropdownMenuItem(value: 'onsite', child: Text('Presencial'))], onChanged: busy ? null : (v) => setState(() => modality = v!)), const SizedBox(height: 16),
-    DropdownButtonFormField<String>(initialValue: contractType, decoration: const InputDecoration(labelText: 'Tipo de contrato'), items: const [DropdownMenuItem(value: 'clt', child: Text('CLT')), DropdownMenuItem(value: 'pj', child: Text('PJ')), DropdownMenuItem(value: 'internship', child: Text('Estágio')), DropdownMenuItem(value: 'temporary', child: Text('Temporário')), DropdownMenuItem(value: 'apprentice', child: Text('Aprendiz')), DropdownMenuItem(value: 'other', child: Text('Outro'))], onChanged: busy ? null : (v) => setState(() => contractType = v!)), const SizedBox(height: 16),
+    DropdownButtonFormField<String>(isExpanded: true, initialValue: modality, decoration: const InputDecoration(labelText: 'Modalidade'), items: const [DropdownMenuItem(value: 'remote', child: Text('Remoto')), DropdownMenuItem(value: 'hybrid', child: Text('Híbrido')), DropdownMenuItem(value: 'onsite', child: Text('Presencial'))], onChanged: busy ? null : (v) => setState(() => modality = v!)), const SizedBox(height: 16),
+    DropdownButtonFormField<String>(isExpanded: true, initialValue: contractType, decoration: const InputDecoration(labelText: 'Tipo de contrato'), items: const [DropdownMenuItem(value: 'clt', child: Text('CLT')), DropdownMenuItem(value: 'pj', child: Text('PJ')), DropdownMenuItem(value: 'internship', child: Text('Estágio')), DropdownMenuItem(value: 'temporary', child: Text('Temporário')), DropdownMenuItem(value: 'apprentice', child: Text('Aprendiz')), DropdownMenuItem(value: 'other', child: Text('Outro'))], onChanged: busy ? null : (v) => setState(() => contractType = v!)), const SizedBox(height: 16),
     if (modality != 'remote') ...[field(city, 'Cidade'), field(state, 'Estado (UF)', validator: (v) => RegExp(r'^[A-Za-z]{2}$').hasMatch(v?.trim() ?? '') ? null : 'Informe a sigla do estado.')],
     field(skills, 'Competências separadas por vírgula'),
     const Text('Sua vaga passará por moderação antes de entrar no feed público.'), const SizedBox(height: 20),
@@ -189,6 +189,55 @@ class _RecruiterApplicationsState extends State<RecruiterApplications> {
     } catch (e) { if (mounted) await friendlyError(context, e); }
     finally { if (mounted) setState(() => downloading = null); }
   }
+
+  Future<void> _openContact(Uri uri) async {
+    try {
+      if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+        throw const ApiException('Não foi possível abrir o aplicativo de contato. Você pode copiar os dados exibidos.');
+      }
+    } catch (error) {
+      if (mounted) await friendlyError(context, error);
+    }
+  }
+
+  Future<void> _contact(Map<String, dynamic> candidate) async {
+    final email = candidate['candidate_email']?.toString().trim() ?? '';
+    final phone = candidate['candidate_phone']?.toString().trim() ?? '';
+    final skills = List<String>.from(candidate['candidate_skills'] as List? ?? const []);
+    final locations = List<String>.from(candidate['preferred_locations'] as List? ?? const []);
+    final summary = (candidate['resume_summary'] ?? candidate['candidate_summary'])?.toString().trim();
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (sheetContext) => ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(sheetContext).height * .85),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const SectionTitle(title: 'Contato do candidato', subtitle: 'Dados compartilhados nesta candidatura.'),
+            Text(candidate['candidate_name']?.toString() ?? 'Candidato', style: Theme.of(sheetContext).textTheme.titleLarge),
+            const SizedBox(height: 16),
+            const Text('E-mail', style: TextStyle(fontWeight: FontWeight.w800)),
+            SelectableText(email.isEmpty ? 'Não informado' : email),
+            if (email.isNotEmpty) TextButton.icon(onPressed: () => _openContact(Uri(scheme: 'mailto', path: email)), icon: const Icon(Icons.mail_outline), label: const Text('Enviar e-mail')),
+            const SizedBox(height: 12),
+            const Text('Telefone', style: TextStyle(fontWeight: FontWeight.w800)),
+            SelectableText(phone.isEmpty ? 'Não informado' : phone),
+            if (phone.isNotEmpty) TextButton.icon(onPressed: () => _openContact(Uri(scheme: 'tel', path: phone.replaceAll(RegExp(r'[^+0-9]'), ''))), icon: const Icon(Icons.phone_outlined), label: const Text('Ligar para candidato')),
+            const SizedBox(height: 18),
+            Text('Resumo do currículo', style: Theme.of(sheetContext).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+            const SizedBox(height: 8),
+            Text(summary?.isNotEmpty == true ? summary! : skills.isEmpty ? 'O candidato ainda não declarou competências no perfil.' : 'Competências declaradas: ${skills.join(' · ')}'),
+            if (locations.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 8), child: Text('Localidade desejada: ${locations.join(', ')}')),
+            if (candidate['salary_expectation'] != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text('Pretensão salarial: R\$ ${candidate['salary_expectation']}')),
+            if (candidate['id'] != null) Padding(padding: const EdgeInsets.only(top: 18), child: OutlinedButton.icon(onPressed: () { Navigator.pop(sheetContext); saveResume(candidate['id'].toString()); }, icon: const Icon(Icons.download_outlined), label: const Text('Salvar currículo PDF'))),
+          ]),
+        ),
+      ),
+    );
+  }
   @override
   Widget build(BuildContext context) => FutureBuilder<dynamic>(future: data, builder: (context, snapshot) {
     if (snapshot.connectionState != ConnectionState.done) return const Center(child: CircularProgressIndicator());
@@ -205,14 +254,14 @@ class _RecruiterApplicationsState extends State<RecruiterApplications> {
         const SizedBox(height: 12),
         TextField(controller: salaryFilter, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Pretensão até R\$ (opcional)', prefixIcon: Icon(Icons.payments_outlined))),
         const SizedBox(height: 12),
-        DropdownButtonFormField<String>(initialValue: workStyle, decoration: const InputDecoration(labelText: 'Estilo de trabalho compatível'), items: const [
+        DropdownButtonFormField<String>(isExpanded: true, initialValue: workStyle, decoration: const InputDecoration(labelText: 'Estilo de trabalho compatível'), items: const [
           DropdownMenuItem(value: '', child: Text('Todos')),
           DropdownMenuItem(value: 'remote', child: Text('Remoto')),
           DropdownMenuItem(value: 'hybrid', child: Text('Híbrido')),
           DropdownMenuItem(value: 'onsite', child: Text('Presencial')),
         ], onChanged: (value) => setState(() => workStyle = value ?? '')),
         const SizedBox(height: 12),
-        DropdownButtonFormField<String>(initialValue: courseFilter, decoration: const InputDecoration(labelText: 'Curso concluído (declarado)'), items: const [
+        DropdownButtonFormField<String>(isExpanded: true, initialValue: courseFilter, decoration: const InputDecoration(labelText: 'Curso concluído (declarado)'), items: const [
           DropdownMenuItem(value: '', child: Text('Qualquer curso')),
           DropdownMenuItem(value: 'bradesco-python', child: Text('Python · Fundação Bradesco')),
           DropdownMenuItem(value: 'senai', child: Text('Qualificação · SENAI')),
@@ -235,7 +284,8 @@ class _RecruiterApplicationsState extends State<RecruiterApplications> {
         const SizedBox(height: 4), Text('Localidade: ${(row['preferred_locations'] as List? ?? []).join(', ')} · Pretensão: R\$ ${row['salary_expectation'] ?? 'não informada'}'),
         const SizedBox(height: 8),
         if ((row['candidate_skills'] as List? ?? []).isNotEmpty) Wrap(spacing: 6, runSpacing: 2, children: [for (final skill in (row['candidate_skills'] as List).take(8)) Chip(visualDensity: VisualDensity.compact, label: Text('$skill'))]),
-        if (row['candidate_email'] != null) TextButton.icon(onPressed: () => contact('${row['candidate_email']}'), icon: const Icon(Icons.mail_outline), label: Text('${row['candidate_email']}')),
+        if (row['candidate_email'] != null) TextButton.icon(onPressed: () => _contact(Map<String, dynamic>.from(row as Map)), icon: const Icon(Icons.mail_outline), label: Text('${row['candidate_email']}', overflow: TextOverflow.ellipsis)),
+        if (row['candidate_email'] == null) TextButton.icon(onPressed: () => _contact(Map<String, dynamic>.from(row as Map)), icon: const Icon(Icons.contact_page_outlined), label: const Text('Contato rápido')),
         if (row['candidate_phone'] != null) SelectableText('Telefone: ${row['candidate_phone']}'),
         const SizedBox(height: 4), Text('Cursos informados: ${(row['completed_course_ids'] as List? ?? []).isEmpty ? 'nenhum' : (row['completed_course_ids'] as List).join(', ')} (autodeclarados)'),
         const SizedBox(height: 6), Text(formatDate(row['created_at'])), const SizedBox(height: 12),

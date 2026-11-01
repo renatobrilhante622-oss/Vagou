@@ -69,3 +69,18 @@ class JobSourcesTests(unittest.TestCase):
                 with self.assertRaises(FeedError):
                     await fetch_feed('https://jobs.example.com/api', ['jobs.example.com'], max_bytes=8)
         asyncio.run(scenario())
+
+
+class ExplicitContactTests(unittest.TestCase):
+    def test_only_explicit_valid_recruitment_contacts_are_collected(self):
+        from app.job_sources import parse_feed
+        record = {'id': 'contact-fixture', 'url': 'https://example.com/jobs/1',
+            'title': 'Python developer', 'company': 'Example',
+            'description': 'Develop and maintain Python services for our product.',
+            'keywords': ['python'], 'recruiter_email': 'recruiting@example.com'}
+        self.assertEqual(parse_feed({'jobs': [record]})[0].contact_email, 'recruiting@example.com')
+        record['recruiter_email'] = 'invalid\r\nBcc: victim@example.com'
+        self.assertIsNone(parse_feed({'jobs': [record]})[0].contact_email)
+        record.pop('recruiter_email')
+        record['description'] += ' Contact someone@example.com for support.'
+        self.assertIsNone(parse_feed({'jobs': [record]})[0].contact_email)
