@@ -46,7 +46,7 @@ class _RecruiterViewState extends State<RecruiterView> {
     final List jobs = result['jobs'] as List;
     final dashboard = Map<String, dynamic>.from(result['dashboard'] as Map);
     final applicationsByJob = Map<String, dynamic>.from(dashboard['applications_by_job'] as Map? ?? const {});
-    return RefreshIndicator(onRefresh: () async { setState(reload); await data; }, child: ListView(padding: const EdgeInsets.all(20), physics: const AlwaysScrollableScrollPhysics(), children: [
+    return RefreshIndicator(onRefresh: () async { setState(reload); await data; }, child: ListView(padding: const EdgeInsets.fromLTRB(20, 4, 20, 20), physics: const AlwaysScrollableScrollPhysics(), children: [
       const SectionTitle(title: 'Central de Recrutamento', subtitle: 'Vagas, candidaturas e conversões em um só lugar.'),
       LayoutBuilder(builder: (context, constraints) {
         final width = (constraints.maxWidth - 12) / 2;
@@ -77,7 +77,7 @@ class _RecruiterViewState extends State<RecruiterView> {
         Row(children: [Expanded(child: Text(job['title'], style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold))), Chip(avatar: Icon(job['moderation_status'] == 'approved' ? Icons.check_circle_outline : Icons.schedule, size: 18), label: Text(job['active'] == false ? 'Encerrada' : statusLabel(job['moderation_status'] ?? 'pending')))]),
         const SizedBox(height: 8), Text('${job['company']} · ${modalityLabel(job['modality'])} · ${job['location']}'),
         const SizedBox(height: 6), Text(job['contract_type'] == null ? 'Contrato não informado' : 'Contrato: ${job['contract_type']}'),
-        Text((num.tryParse('${job['salary_min']}') ?? 0) == 0 && (num.tryParse('${job['salary_max']}') ?? 0) == 0 ? 'Salário não informado' : 'R\$ ${job['salary_min']} – R\$ ${job['salary_max']}'),
+        Text(formatSalaryRange(job['salary_min'], job['salary_max'])),
         const SizedBox(height: 6), Text('${applicationsByJob['${job['id']}'] ?? 0} candidaturas recebidas'),
         Text('Publicada em ${formatDate(job['created_at'])}'),
         if (job['moderation_status'] == 'rejected') Padding(padding: const EdgeInsets.only(top: 8), child: Text(job['moderation_note']?.toString().trim().isNotEmpty == true ? job['moderation_note'].toString() : 'Esta publicação não foi aprovada. Consulte o atendimento antes de republicar.')),
@@ -234,7 +234,7 @@ class _RecruiterApplicationsState extends State<RecruiterApplications> {
             const SizedBox(height: 8),
             Text(summary?.isNotEmpty == true ? summary! : skills.isEmpty ? 'O candidato ainda não declarou competências no perfil.' : 'Competências declaradas: ${skills.join(' · ')}'),
             if (locations.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 8), child: Text('Localidade desejada: ${locations.join(', ')}')),
-            if (candidate['salary_expectation'] != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text('Pretensão salarial: R\$ ${candidate['salary_expectation']}')),
+            if (candidate['salary_expectation'] != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text('Pretensão salarial: ${formatBrlCurrency(candidate['salary_expectation'])}')),
             if (candidate['id'] != null) Padding(padding: const EdgeInsets.only(top: 18), child: OutlinedButton.icon(onPressed: () { Navigator.pop(sheetContext); saveResume(candidate['id'].toString()); }, icon: const Icon(Icons.download_outlined), label: const Text('Salvar currículo PDF'))),
           ]),
         ),
@@ -284,7 +284,7 @@ class _RecruiterApplicationsState extends State<RecruiterApplications> {
         Text(row['job_title'] ?? 'Oportunidade', style: Theme.of(context).textTheme.titleMedium), const SizedBox(height: 8),
         Wrap(spacing: 8, runSpacing: 4, children: [Chip(avatar: const Icon(Icons.auto_awesome, size: 16), label: Text('${row['match_score']}% Match')), Chip(label: Text(row['status'] == 'submitted' ? 'Nova candidatura' : statusLabel('${row['status']}')))]),
         Text('Modalidade: ${row['work_style_fit'] == 'aligned' ? 'alinhada' : row['work_style_fit'] == 'different' ? 'diferente' : 'não informada'}'),
-        const SizedBox(height: 4), Text('Localidade: ${(row['preferred_locations'] as List? ?? []).join(', ')} · Pretensão: R\$ ${row['salary_expectation'] ?? 'não informada'}'),
+        const SizedBox(height: 4), Text('Localidade: ${(row['preferred_locations'] as List? ?? []).join(', ')} · Pretensão: ${row['salary_expectation'] == null ? 'não informada' : formatBrlCurrency(row['salary_expectation'])}'),
         const SizedBox(height: 8),
         if ((row['candidate_skills'] as List? ?? []).isNotEmpty) Wrap(spacing: 6, runSpacing: 2, children: [for (final skill in (row['candidate_skills'] as List).take(8)) Chip(visualDensity: VisualDensity.compact, label: Text('$skill'))]),
         if (row['candidate_email'] != null) TextButton.icon(onPressed: () => _contact(Map<String, dynamic>.from(row as Map)), icon: const Icon(Icons.mail_outline), label: Text('${row['candidate_email']}', overflow: TextOverflow.ellipsis)),

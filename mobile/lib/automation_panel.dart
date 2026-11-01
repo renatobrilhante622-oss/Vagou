@@ -176,7 +176,7 @@ class _AutomationPanelState extends State<_AutomationPanel> {
     final region = locations.isEmpty ? 'qualquer região' : locations.join(', ');
     final mode = modalities.isEmpty ? 'todas as modalidades' : modalities.map((item) => const {'remote': 'remoto', 'hybrid': 'híbrido', 'onsite': 'presencial'}[item] ?? item).join(', ');
     final minimum = num.tryParse('${_preferences['min_salary'] ?? 0}') ?? 0;
-    final salary = minimum > 0 ? 'piso R\$ ${minimum.toStringAsFixed(0)}' : 'sem piso salarial';
+    final salary = minimum > 0 ? 'piso ${formatBrlCurrency(minimum)}' : 'sem piso salarial';
     final contracts = List<String>.from(_preferences['contract_types'] as List? ?? const []);
     final contract = contracts.isEmpty ? 'todos os contratos' : contracts.map((item) => contractLabels[item] ?? item).join(', ');
     final keywords = List<String>.from(_preferences['keywords'] as List? ?? const []);
@@ -228,12 +228,12 @@ class _AutomationPanelState extends State<_AutomationPanel> {
   Widget build(BuildContext context) {
     if (_loading) return const SizedBox(height: 320, child: Center(child: CircularProgressIndicator()));
     final active = _activeRunId != null || _runStatus == 'running' || _runStatus == 'queued';
-    return Padding(padding: const EdgeInsets.fromLTRB(20, 8, 20, 24), child: ListView(shrinkWrap: true, children: [
+    return Padding(padding: const EdgeInsets.fromLTRB(20, 4, 20, 20), child: ListView(shrinkWrap: true, children: [
       Container(margin: const EdgeInsets.only(bottom: 16), padding: const EdgeInsets.all(20), decoration: BoxDecoration(
         gradient: const LinearGradient(colors: [Brand.navy, Color(0xFF1E4864)], begin: Alignment.topLeft, end: Alignment.bottomRight),
         borderRadius: BorderRadius.circular(18),
       ), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [Container(width: 42, height: 42, decoration: BoxDecoration(color: Brand.coral.withValues(alpha: .18), borderRadius: BorderRadius.circular(12)), child: const Icon(Icons.radar, color: Color(0xFFE7C36A))), const SizedBox(width: 12), Expanded(child: Text('Central de Automação', style: Theme.of(context).textTheme.titleLarge?.copyWith(color: Colors.white, fontWeight: FontWeight.w800))), if (_busy) const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))]),
+        Row(children: [Container(width: 42, height: 42, decoration: BoxDecoration(color: Brand.coral.withValues(alpha: .18), borderRadius: BorderRadius.circular(12)), child: const Icon(Icons.radar, color: Color(0xFFE7C36A))), const SizedBox(width: 12), Expanded(child: Text('Central de Automação', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700))), if (_busy) const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))]),
         const SizedBox(height: 12),
         Wrap(spacing: 8, runSpacing: 4, children: [
           _statusBadge(_premium ? 'VAGOU! PRO' : 'PLANO GRATUITO'),

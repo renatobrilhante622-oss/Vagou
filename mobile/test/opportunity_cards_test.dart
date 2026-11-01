@@ -50,6 +50,15 @@ void viewport(WidgetTester tester, double width) {
 }
 
 void main() {
+  test('salary ranges use Brazilian formatting and collapse equal values', () {
+    expect(
+        opportunitySalary({...opportunity, 'salary_min': 1750.0, 'salary_max': 1750}),
+        'R\$ 1.750');
+    expect(
+        opportunitySalary({...opportunity, 'salary_min': 2500, 'salary_max': 3500}),
+        'R\$ 2.500 a R\$ 3.500');
+  });
+
   test('repeated reasons and historical detail become a single explanation',
       () {
     expect(
@@ -94,7 +103,7 @@ void main() {
       expect(find.text('Empresa Brasileira de Tecnologia · Brasília / DF'),
           findsOneWidget);
       expect(find.text('55% de compatibilidade'), findsOneWidget);
-      expect(find.text('R\$ 3000 a R\$ 4500'), findsOneWidget);
+      expect(find.text('R\$ 3.000 a R\$ 4.500'), findsOneWidget);
       expect(find.text('Híbrido'), findsOneWidget);
       expect(find.text('CLT'), findsOneWidget);
       expect(find.text('Competências próximas do perfil.'), findsOneWidget);

@@ -3,25 +3,28 @@ import 'package:url_launcher/url_launcher.dart';
 import 'api.dart';
 
 class Brand {
-  static const navy = Color(0xFF102A43);
-  static const teal = Color(0xFF087F8C);
+  static const navy = Color(0xFF0F172A);
+  static const teal = Color(0xFF2563EB);
   static const coral = Color(0xFFEF8354);
   static ThemeData theme(Brightness brightness) {
     final dark = brightness == Brightness.dark;
-    final scheme = ColorScheme.fromSeed(seedColor: teal, brightness: brightness);
+    final scheme = ColorScheme.fromSeed(seedColor: teal, brightness: brightness).copyWith(
+      primary: teal,
+      surface: dark ? const Color(0xFF131F2E) : Colors.white,
+    );
     return ThemeData(
       useMaterial3: true, brightness: brightness, colorScheme: scheme,
-      scaffoldBackgroundColor: dark ? const Color(0xFF0B1520) : const Color(0xFFF3F6FA),
+      scaffoldBackgroundColor: dark ? const Color(0xFF0B1520) : const Color(0xFFF8FAFC),
       appBarTheme: const AppBarTheme(centerTitle: false, elevation: 0, scrolledUnderElevation: 0),
       inputDecorationTheme: InputDecorationTheme(
         filled: true, fillColor: scheme.surface,
         contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide(color: scheme.outlineVariant)),
-        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide(color: scheme.outlineVariant)),
-        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide(color: scheme.primary, width: 2)),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: scheme.outlineVariant)),
+        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: scheme.outlineVariant)),
+        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: scheme.primary, width: 2)),
       ),
-      filledButtonTheme: FilledButtonThemeData(style: FilledButton.styleFrom(minimumSize: const Size(0, 52), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)))),
-      outlinedButtonTheme: OutlinedButtonThemeData(style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)))),
+      filledButtonTheme: FilledButtonThemeData(style: FilledButton.styleFrom(minimumSize: const Size(0, 52), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)))),
+      outlinedButtonTheme: OutlinedButtonThemeData(style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)))),
       navigationBarTheme: NavigationBarThemeData(indicatorColor: scheme.primaryContainer, height: 74),
     );
   }
@@ -33,7 +36,7 @@ class BrandMark extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Row(mainAxisSize: MainAxisSize.min, children: [
     Container(width: size, height: size, alignment: Alignment.center, decoration: BoxDecoration(color: Brand.navy, borderRadius: BorderRadius.circular(size * .28)), child: Text('V!', style: TextStyle(color: const Color(0xFF17D6BA), fontSize: size * .57, fontWeight: FontWeight.w900, letterSpacing: -2))),
-    const SizedBox(width: 12), Text('Vagou!', style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w900, letterSpacing: -1)),
+    const SizedBox(width: 12), Flexible(child: Text('Vagou!', style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w900, letterSpacing: -1))),
   ]);
 }
 
@@ -43,9 +46,9 @@ class Panel extends StatelessWidget {
   const Panel({super.key, required this.child, this.padding = const EdgeInsets.all(20)});
   @override
   Widget build(BuildContext context) => Container(margin: const EdgeInsets.only(bottom: 16), padding: padding, decoration: BoxDecoration(
-    color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(24),
-    border: Border.all(color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: .5)),
-    boxShadow: [BoxShadow(color: Brand.navy.withValues(alpha: .035), blurRadius: 18, offset: const Offset(0, 5))],
+    color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(12),
+    border: Border.all(color: const Color(0xFFE2E8F0)),
+    boxShadow: [BoxShadow(color: Brand.navy.withValues(alpha: .035), blurRadius: 12, offset: const Offset(0, 3))],
   ), child: child);
 }
 
@@ -54,10 +57,37 @@ class SectionTitle extends StatelessWidget {
   final String? subtitle;
   const SectionTitle({super.key, required this.title, this.subtitle});
   @override
-  Widget build(BuildContext context) => Padding(padding: const EdgeInsets.only(bottom: 18, top: 8), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-    Text(title, style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),
+  Widget build(BuildContext context) => Padding(padding: const EdgeInsets.only(bottom: 12, top: 0), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontSize: 17, fontWeight: FontWeight.w700)),
     if (subtitle != null) ...[const SizedBox(height: 6), Text(subtitle!, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant))],
   ]));
+}
+
+String formatBrlAmount(dynamic value) {
+  final amount = num.tryParse('${value ?? ''}'.trim().replaceAll(',', '.'));
+  if (amount == null) return '0';
+  final fixed = amount.abs().toStringAsFixed(
+      amount == amount.roundToDouble() ? 0 : 2);
+  final parts = fixed.split('.');
+  final digits = parts.first;
+  final grouped = StringBuffer();
+  for (var index = 0; index < digits.length; index++) {
+    if (index > 0 && (digits.length - index) % 3 == 0) grouped.write('.');
+    grouped.write(digits[index]);
+  }
+  final sign = amount < 0 ? '-' : '';
+  return '$sign$grouped${parts.length == 1 ? '' : ',${parts[1]}'}';
+}
+
+String formatBrlCurrency(dynamic value) => 'R\$ ${formatBrlAmount(value)}';
+
+String formatSalaryRange(dynamic minimumValue, dynamic maximumValue) {
+  final minimum = num.tryParse('${minimumValue ?? ''}') ?? 0;
+  final maximum = num.tryParse('${maximumValue ?? ''}') ?? 0;
+  if (minimum <= 0 && maximum <= 0) return 'Salário não informado';
+  if (minimum <= 0) return 'Até ${formatBrlCurrency(maximum)}';
+  if (maximum <= 0 || minimum == maximum) return formatBrlCurrency(minimum);
+  return '${formatBrlCurrency(minimum)} a ${formatBrlCurrency(maximum)}';
 }
 
 class EmptyState extends StatelessWidget {

@@ -33,15 +33,10 @@ String opportunityModality(dynamic value) =>
     'Modalidade não informada';
 
 String opportunitySalary(Map row) {
-  final minimum = num.tryParse('${row['salary_min']}') ?? 0;
-  final maximum = num.tryParse('${row['salary_max']}') ?? 0;
-  String amount(num value) => value
-      .toStringAsFixed(value == value.roundToDouble() ? 0 : 2)
-      .replaceAll('.', ',');
-  if (minimum <= 0 && maximum <= 0) return 'Faixa salarial não informada';
-  if (minimum <= 0) return 'Até R\$ ${amount(maximum)}';
-  if (maximum <= 0 || minimum == maximum) return 'R\$ ${amount(minimum)}';
-  return 'R\$ ${amount(minimum)} a R\$ ${amount(maximum)}';
+  final salary = formatSalaryRange(row['salary_min'], row['salary_max']);
+  return salary == 'Salário não informado'
+      ? 'Faixa salarial não informada'
+      : salary;
 }
 
 /// Events used to repeat their reasons in both `match_reasons` and `detail`.
@@ -160,7 +155,16 @@ class _OpportunityDetailsState extends State<OpportunityDetails> {
       const SizedBox(height: 10),
       Wrap(spacing: 8, runSpacing: 4, children: [
         if (!search && widget.showScore && row['match_score'] != null)
-          Chip(label: Text('${row['match_score']}% de compatibilidade')),
+          Chip(
+              backgroundColor: (num.tryParse('${row['match_score']}') ?? 0) >= 70
+                  ? const Color(0xFFECFDF5)
+                  : const Color(0xFFFFFBEB),
+              labelStyle: TextStyle(
+                  color: (num.tryParse('${row['match_score']}') ?? 0) >= 70
+                      ? const Color(0xFF059669)
+                      : const Color(0xFFD97706),
+                  fontWeight: FontWeight.w700),
+              label: Text('${row['match_score']}% de compatibilidade')),
         Chip(label: Text(source)),
         if (row['status'] != null)
           Chip(

@@ -62,6 +62,28 @@ class MatchingTests(unittest.TestCase):
         self.assertTrue(any('Cidade/UF' in reason for reason in possible['missed_reasons']))
         self.assertEqual(discarded['category'], 'discarded')
 
+    def test_unrelated_area_cannot_become_possible_from_location_and_modality(self):
+        job = SimpleNamespace(title='Auxiliar Administrativo',
+            description='Organização de documentos, planilhas e rotinas administrativas.',
+            keywords=['excel'], salary_min=2500, salary_max=4000,
+            modality='onsite', location='Recife / PE', contract_type='clt')
+        preferences = {'titles': ['Suporte / TI / NOC'],
+            'keywords': ['Windows', 'redes', 'NOC'], 'locations': ['Recife / PE'],
+            'modalities': ['onsite']}
+
+        result = evaluate_job(job, ['Excel', 'Windows', 'redes'], preferences)
+
+        self.assertLess(result['match_score'], 40)
+        self.assertEqual(result['category'], 'discarded')
+        self.assertTrue(any('não corresponde à sua busca' in reason
+                            for reason in result['missed_reasons']))
+
+        technical_overlap = evaluate_job(
+            SimpleNamespace(**{**vars(job), 'keywords': ['windows']}),
+            ['Excel', 'Windows', 'redes'], preferences)
+        self.assertTrue(40 <= technical_overlap['match_score'] < 70)
+        self.assertEqual(technical_overlap['category'], 'possible')
+
 
 if __name__ == '__main__':
     unittest.main()
