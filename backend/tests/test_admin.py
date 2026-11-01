@@ -65,6 +65,7 @@ class AdminContract(unittest.TestCase):
             engine = create_async_engine(settings().database_url)
             sessions = async_sessionmaker(engine, expire_on_commit=False)
             ids = [uuid.uuid4() for _ in range(4)]
+            external_id = uuid.uuid4()
             headers = {}
             try:
                 async with sessions.begin() as db:
@@ -155,6 +156,16 @@ class AdminContract(unittest.TestCase):
                     auto = await call("POST", "/jobs", "recruiter", payload, 201)
                     self.assertEqual(auto["moderation_status"], "approved")
                     self.assertEqual(auto["moderated_by_user_id"], str(ids[3]))
+                    async with sessions.begin() as db:
+                        db.add(
+                            Job(
+                                id=external_id,
+                                **payload,
+                                source_name="CI partner",
+                                source_url=f"https://example.com/jobs/{external_id}",
+                                moderation_status="approved",
+                            )
+                        )
                     feed = await call("GET", "/internal-jobs", "candidate")
                     match = next(
                         item
@@ -162,6 +173,21 @@ class AdminContract(unittest.TestCase):
                         if item["job"]["id"] == auto["id"]
                     )
                     self.assertTrue(match["job"]["company_verified"])
+                    self.assertEqual(feed["catalog_status"], "available")
+                    contingency = await call(
+                        "GET", "/jobs?internal_only=true", "candidate"
+                    )
+                    self.assertIn(auto["id"], {item["id"] for item in contingency})
+                    self.assertNotIn(job["id"], {item["id"] for item in contingency})
+                    self.assertTrue(
+                        all(item["source_url"] is None for item in contingency)
+                    )
+                    self.assertNotIn(
+                        str(external_id), {item["id"] for item in contingency}
+                    )
+                    self.assertNotIn(
+                        str(external_id), {item["job"]["id"] for item in feed["items"]}
+                    )
                     await call(
                         "POST",
                         f"/jobs/{auto['id']}/applications",
@@ -244,6 +270,7 @@ class AdminContract(unittest.TestCase):
                         self.assertFalse(archived.active)
             finally:
                 async with sessions.begin() as db:
+                    await db.execute(delete(Job).where(Job.id == external_id))
                     await db.execute(delete(User).where(User.id.in_(ids)))
                     await db.execute(
                         delete(AdminAudit).where(AdminAudit.actor_id.is_(None))

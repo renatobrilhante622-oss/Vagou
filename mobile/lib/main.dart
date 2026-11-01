@@ -33,6 +33,9 @@ class _VagouAppState extends State<VagouApp> {
     initialize();
   }
 
+  Future<Map<String, dynamic>> _account() async => Map<String, dynamic>.from(
+      await api.request('GET', '/me').timeout(const Duration(seconds: 15)));
+
   Future<void> initialize() async {
     setState(() {
       loading = true;
@@ -40,8 +43,7 @@ class _VagouAppState extends State<VagouApp> {
     });
     try {
       onboarding = await api.storage.read(key: 'onboarding_seen') != 'true';
-      if (await api.restore())
-        user = Map<String, dynamic>.from(await api.request('GET', '/me'));
+      if (await api.restore()) user = await _account();
     } catch (e) {
       if (e is! ApiException || e.status != 401) error = e;
     } finally {
@@ -50,7 +52,7 @@ class _VagouAppState extends State<VagouApp> {
   }
 
   Future<void> authenticated() async {
-    final result = Map<String, dynamic>.from(await api.request('GET', '/me'));
+    final result = await _account();
     if (mounted)
       setState(() {
         user = result;
@@ -59,7 +61,7 @@ class _VagouAppState extends State<VagouApp> {
   }
 
   Future<void> refreshUser() async {
-    final result = Map<String, dynamic>.from(await api.request('GET', '/me'));
+    final result = await _account();
     if (mounted) setState(() => user = result);
   }
 

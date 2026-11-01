@@ -2,8 +2,38 @@ import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'api.dart';
+import 'resume.dart';
+import 'forms.dart';
 import 'jobs.dart';
 import 'ui.dart';
+
+Uri? candidateWhatsAppUri(Map candidate) {
+  var digits =
+      '${candidate['candidate_phone'] ?? ''}'.replaceAll(RegExp(r'\D'), '');
+  if (digits.length == 10 || digits.length == 11) digits = '55$digits';
+  if (!RegExp(r'^55\d{10,11}$').hasMatch(digits)) return null;
+  return Uri.https('wa.me', '/$digits', {
+    'text':
+        'Olá, ${candidate['candidate_name'] ?? 'candidato'}! Recebemos sua candidatura para ${candidate['job_title'] ?? 'nossa vaga'} pelo Vagou! Podemos conversar?'
+  });
+}
+
+Uri? candidateEmailUri(Map candidate) {
+  final email = '${candidate['candidate_email'] ?? ''}'.trim();
+  if (!RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(email)) return null;
+  return Uri(
+      scheme: 'mailto',
+      path: email,
+      query: {
+        'subject': 'Candidatura: ${candidate['job_title'] ?? 'Vagou!'}',
+        'body':
+            'Olá, ${candidate['candidate_name'] ?? 'candidato'}! Recebemos seu currículo pelo Vagou! e gostaríamos de conversar sobre sua candidatura.',
+      }
+          .entries
+          .map((entry) =>
+              '${Uri.encodeComponent(entry.key)}=${Uri.encodeComponent(entry.value)}')
+          .join('&'));
+}
 
 class RecruiterView extends StatefulWidget {
   final Api api;
@@ -509,6 +539,31 @@ class _RecruiterApplicationsState extends State<RecruiterApplications> {
     }
   }
 
+  Future<void> _viewResume(String id) async {
+    await Navigator.push(
+        context,
+        MaterialPageRoute(
+            builder: (_) => ResumeViewer(
+                api: widget.api,
+                path: '/applications/$id/resume',
+                title: 'Currículo do candidato')));
+  }
+
+  Widget _contactActions(Map row) {
+    final whatsapp = candidateWhatsAppUri(row);
+    final email = candidateEmailUri(row);
+    return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Wrap(spacing: 8, runSpacing: 8, children: [
+          FilledButton.tonal(
+              onPressed: whatsapp == null ? null : () => _openContact(whatsapp),
+              child: const Text('💬 Chamar no WhatsApp')),
+          OutlinedButton(
+              onPressed: email == null ? null : () => _openContact(email),
+              child: const Text('📧 Enviar E-mail')),
+        ]));
+  }
+
   Future<void> _openContact(Uri uri) async {
     try {
       if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
@@ -573,13 +628,15 @@ class _RecruiterApplicationsState extends State<RecruiterApplications> {
                       label: const Text('Ligar para candidato')),
                 if (phone.isNotEmpty)
                   TextButton.icon(
-                      onPressed: () => _openContact(Uri.https('wa.me',
-                          '/${phone.replaceAll(RegExp(r'[^0-9]'), '')}')),
+                      onPressed: candidateWhatsAppUri(candidate) == null
+                          ? null
+                          : () =>
+                              _openContact(candidateWhatsAppUri(candidate)!),
                       icon: const Icon(Icons.chat_outlined),
                       label: const Text('Abrir WhatsApp')),
                 if (candidate['candidate_birth_date'] != null)
                   Text(
-                      'Nascimento: ${candidate['candidate_birth_date']} · ${candidate['candidate_age'] ?? '—'} anos'),
+                      'Nascimento: ${birthDateDisplay(candidate['candidate_birth_date'])} · ${candidate['candidate_age'] ?? '—'} anos'),
                 if (candidate['candidate_city'] != null)
                   Text(
                       'Cidade/UF: ${candidate['candidate_city']} / ${candidate['candidate_state'] ?? ''}'),
@@ -650,95 +707,110 @@ class _RecruiterApplicationsState extends State<RecruiterApplications> {
                 padding: const EdgeInsets.all(20),
                 physics: const AlwaysScrollableScrollPhysics(),
                 children: [
-                  const ExecutiveHero(
-                      title: 'Cada candidatura é uma possibilidade',
-                      subtitle:
-                          'Filtre apenas pessoas inscritas em vagas da sua empresa.',
-                      eyebrow: 'PIPELINE DE TALENTOS'),
-                  Panel(
-                      child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                        const Text('Filtros de recrutamento',
-                            style: TextStyle(fontWeight: FontWeight.w800)),
-                        const SizedBox(height: 8),
-                        const Text(
-                            'Compatibilidade técnica e preferências profissionais declaradas. Não use atributos pessoais ou sensíveis para seleção.'),
-                        const SizedBox(height: 12),
-                        TextField(
-                            controller: locationFilter,
-                            decoration: const InputDecoration(
-                                labelText: 'Cidade/UF declarada',
-                                prefixIcon: Icon(Icons.location_on_outlined))),
-                        const SizedBox(height: 12),
-                        TextField(
-                            controller: salaryFilter,
-                            keyboardType: const TextInputType.numberWithOptions(
-                                decimal: true),
-                            decoration: const InputDecoration(
-                                labelText: 'Pretensão até R\$ (opcional)',
-                                prefixIcon: Icon(Icons.payments_outlined))),
-                        const SizedBox(height: 12),
-                        DropdownButtonFormField<String>(
-                            isExpanded: true,
-                            initialValue: workStyle,
-                            decoration: const InputDecoration(
-                                labelText: 'Estilo de trabalho compatível'),
-                            items: const [
-                              DropdownMenuItem(value: '', child: Text('Todos')),
-                              DropdownMenuItem(
-                                  value: 'remote', child: Text('Remoto')),
-                              DropdownMenuItem(
-                                  value: 'hybrid', child: Text('Híbrido')),
-                              DropdownMenuItem(
-                                  value: 'onsite', child: Text('Presencial')),
-                            ],
-                            onChanged: (value) =>
-                                setState(() => workStyle = value ?? '')),
-                        const SizedBox(height: 12),
-                        DropdownButtonFormField<String>(
-                            isExpanded: true,
-                            initialValue: courseFilter,
-                            decoration: const InputDecoration(
-                                labelText: 'Curso concluído (declarado)'),
-                            items: const [
-                              DropdownMenuItem(
-                                  value: '', child: Text('Qualquer curso')),
-                              DropdownMenuItem(
-                                  value: 'bradesco-python',
-                                  child: Text('Python · Fundação Bradesco')),
-                              DropdownMenuItem(
-                                  value: 'senai',
-                                  child: Text('Qualificação · SENAI')),
-                              DropdownMenuItem(
-                                  value: 'sebrae',
-                                  child: Text('Gestão · Sebrae')),
-                              DropdownMenuItem(
-                                  value: 'microsoft',
-                                  child: Text('Microsoft Learn')),
-                              DropdownMenuItem(
-                                  value: 'cisco',
-                                  child: Text('Python · Cisco')),
-                            ],
-                            onChanged: (value) =>
-                                setState(() => courseFilter = value ?? '')),
-                        const SizedBox(height: 12),
-                        Text('Compatibilidade técnica mínima: $minMatch%'),
-                        Slider(
-                            value: minMatch.toDouble(),
-                            min: 0,
-                            max: 100,
-                            divisions: 10,
-                            label: '$minMatch%',
-                            onChanged: (value) =>
-                                setState(() => minMatch = value.round())),
-                        SizedBox(
-                            width: double.infinity,
-                            child: FilledButton.icon(
-                                onPressed: () => setState(reload),
-                                icon: const Icon(Icons.filter_alt_outlined),
-                                label: const Text('Aplicar filtros'))),
-                      ])),
+                  const SectionTitle(
+                      title: 'Talentos & Candidatos',
+                      subtitle: 'Pessoas inscritas nas vagas da sua empresa.'),
+                  ExpansionTile(
+                      leading: const Icon(Icons.tune),
+                      title: const Text('Filtros de recrutamento'),
+                      children: [
+                        Panel(
+                            child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                              const Text('Filtros de recrutamento',
+                                  style:
+                                      TextStyle(fontWeight: FontWeight.w800)),
+                              const SizedBox(height: 8),
+                              const Text(
+                                  'Compatibilidade técnica e preferências profissionais declaradas. Não use atributos pessoais ou sensíveis para seleção.'),
+                              const SizedBox(height: 12),
+                              TextField(
+                                  controller: locationFilter,
+                                  decoration: const InputDecoration(
+                                      labelText: 'Cidade/UF declarada',
+                                      prefixIcon:
+                                          Icon(Icons.location_on_outlined))),
+                              const SizedBox(height: 12),
+                              TextField(
+                                  controller: salaryFilter,
+                                  keyboardType:
+                                      const TextInputType.numberWithOptions(
+                                          decimal: true),
+                                  decoration: const InputDecoration(
+                                      labelText: 'Pretensão até R\$ (opcional)',
+                                      prefixIcon:
+                                          Icon(Icons.payments_outlined))),
+                              const SizedBox(height: 12),
+                              DropdownButtonFormField<String>(
+                                  isExpanded: true,
+                                  initialValue: workStyle,
+                                  decoration: const InputDecoration(
+                                      labelText:
+                                          'Estilo de trabalho compatível'),
+                                  items: const [
+                                    DropdownMenuItem(
+                                        value: '', child: Text('Todos')),
+                                    DropdownMenuItem(
+                                        value: 'remote', child: Text('Remoto')),
+                                    DropdownMenuItem(
+                                        value: 'hybrid',
+                                        child: Text('Híbrido')),
+                                    DropdownMenuItem(
+                                        value: 'onsite',
+                                        child: Text('Presencial')),
+                                  ],
+                                  onChanged: (value) =>
+                                      setState(() => workStyle = value ?? '')),
+                              const SizedBox(height: 12),
+                              DropdownButtonFormField<String>(
+                                  isExpanded: true,
+                                  initialValue: courseFilter,
+                                  decoration: const InputDecoration(
+                                      labelText: 'Curso concluído (declarado)'),
+                                  items: const [
+                                    DropdownMenuItem(
+                                        value: '',
+                                        child: Text('Qualquer curso')),
+                                    DropdownMenuItem(
+                                        value: 'bradesco-python',
+                                        child:
+                                            Text('Python · Fundação Bradesco')),
+                                    DropdownMenuItem(
+                                        value: 'senai',
+                                        child: Text('Qualificação · SENAI')),
+                                    DropdownMenuItem(
+                                        value: 'sebrae',
+                                        child: Text('Gestão · Sebrae')),
+                                    DropdownMenuItem(
+                                        value: 'microsoft',
+                                        child: Text('Microsoft Learn')),
+                                    DropdownMenuItem(
+                                        value: 'cisco',
+                                        child: Text('Python · Cisco')),
+                                  ],
+                                  onChanged: (value) => setState(
+                                      () => courseFilter = value ?? '')),
+                              const SizedBox(height: 12),
+                              Text(
+                                  'Compatibilidade técnica mínima: $minMatch%'),
+                              Slider(
+                                  value: minMatch.toDouble(),
+                                  min: 0,
+                                  max: 100,
+                                  divisions: 10,
+                                  label: '$minMatch%',
+                                  onChanged: (value) =>
+                                      setState(() => minMatch = value.round())),
+                              SizedBox(
+                                  width: double.infinity,
+                                  child: FilledButton.icon(
+                                      onPressed: () => setState(reload),
+                                      icon:
+                                          const Icon(Icons.filter_alt_outlined),
+                                      label: const Text('Aplicar filtros'))),
+                            ]))
+                      ]),
                   if (rows.isEmpty)
                     const EmptyState(
                         icon: Icons.people_outline,
@@ -778,6 +850,18 @@ class _RecruiterApplicationsState extends State<RecruiterApplications> {
                                     ? 'Nova candidatura'
                                     : statusLabel('${row['status']}')))
                           ]),
+                          if (row['candidate_birth_date'] != null)
+                            Text(
+                                'Nascimento: ${birthDateDisplay(row['candidate_birth_date'])} · ${row['candidate_age'] ?? '—'} anos'),
+                          if (row['candidate_city'] != null)
+                            Text(
+                                'Cidade/UF: ${row['candidate_city']} / ${row['candidate_state'] ?? ''}'),
+                          if (row['candidate_seniority'] != null)
+                            Text('Senioridade: ${row['candidate_seniority']}'),
+                          if ('${row['candidate_summary'] ?? ''}'.isNotEmpty)
+                            Text('${row['candidate_summary']}',
+                                maxLines: 3, overflow: TextOverflow.ellipsis),
+                          _contactActions(row as Map),
                           Text(
                               'Modalidade: ${row['work_style_fit'] == 'aligned' ? 'alinhada' : row['work_style_fit'] == 'different' ? 'diferente' : 'não informada'}'),
                           const SizedBox(height: 4),
@@ -795,15 +879,15 @@ class _RecruiterApplicationsState extends State<RecruiterApplications> {
                             ]),
                           if (row['candidate_email'] != null)
                             TextButton.icon(
-                                onPressed: () => _contact(
-                                    Map<String, dynamic>.from(row as Map)),
+                                onPressed: () =>
+                                    _contact(Map<String, dynamic>.from(row)),
                                 icon: const Icon(Icons.mail_outline),
                                 label: Text('${row['candidate_email']}',
                                     overflow: TextOverflow.ellipsis)),
                           if (row['candidate_email'] == null)
                             TextButton.icon(
-                                onPressed: () => _contact(
-                                    Map<String, dynamic>.from(row as Map)),
+                                onPressed: () =>
+                                    _contact(Map<String, dynamic>.from(row)),
                                 icon: const Icon(Icons.contact_page_outlined),
                                 label: const Text('Contato rápido')),
                           if (row['candidate_phone'] != null)
@@ -815,8 +899,15 @@ class _RecruiterApplicationsState extends State<RecruiterApplications> {
                           const SizedBox(height: 6),
                           Text(formatDate(row['created_at'])),
                           const SizedBox(height: 12),
+                          if (row['candidate_resume_available'] != false)
+                            TextButton.icon(
+                                onPressed: () =>
+                                    _viewResume(row['id'].toString()),
+                                icon: const Icon(Icons.picture_as_pdf_outlined),
+                                label: const Text('Visualizar currículo PDF')),
                           OutlinedButton.icon(
-                              onPressed: downloading != null
+                              onPressed: downloading != null ||
+                                      row['candidate_resume_available'] == false
                                   ? null
                                   : () => saveResume(row['id'].toString()),
                               icon: downloading == row['id']

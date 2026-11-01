@@ -11,6 +11,7 @@ dependencies:
   flutter_secure_storage: ^9.2.4
   file_picker: ^9.0.0
   url_launcher: ^6.3.1
+  pdfx: ^2.11.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

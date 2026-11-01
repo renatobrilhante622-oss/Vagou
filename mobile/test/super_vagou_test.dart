@@ -64,6 +64,7 @@ void main() {
           'items': [
             {
               'category': 'internal',
+              'match_score': 85,
               'job': {
                 'id': 'native-1',
                 'title': 'Analista de Suporte',
@@ -86,9 +87,14 @@ void main() {
         theme: Brand.theme(Brightness.light),
         home: Scaffold(body: JobsView(api: api, onUserChanged: () async {}))));
     await tester.pumpAndSettle();
-    expect(find.text('Vagas no App (Empresas)'), findsOneWidget);
+    expect(find.text('Vagas no App (Oficiais)'), findsOneWidget);
     expect(find.text('Empresa Verificada'), findsOneWidget);
+    expect(find.byTooltip('Empresa Verificada'), findsOneWidget);
+    expect(find.text('85%'), findsOneWidget);
     expect(requests, isNot(contains('/v1/radar')));
+    expect(find.text('Candidatar-se com 1 Toque'), findsNothing);
+    await tester.tap(find.text('Analista de Suporte'));
+    await tester.pumpAndSettle();
     await tester.scrollUntilVisible(find.text('Candidatar-se com 1 Toque'), 250,
         scrollable: find.byType(Scrollable).first);
     await tester.ensureVisible(find.text('Candidatar-se com 1 Toque'));

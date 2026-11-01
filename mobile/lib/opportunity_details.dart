@@ -301,3 +301,87 @@ class _OpportunityDetailsState extends State<OpportunityDetails> {
     ]);
   }
 }
+
+/// Only essential information belongs in the feed. Full data lives in the sheet.
+class OpportunitySummary extends StatelessWidget {
+  final Map row;
+  final VoidCallback onTap;
+  const OpportunitySummary({super.key, required this.row, required this.onTap});
+  @override
+  Widget build(BuildContext context) {
+    final company =
+        opportunityValue(row, const ['company', 'company_name'], 'Empresa');
+    final score = row['match_score'];
+    return Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Material(
+            color: Theme.of(context).colorScheme.surface,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: const BorderSide(color: Color(0xFFE2E8F0))),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+                onTap: onTap,
+                child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                CompanyAvatar(company: company),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                    child: Text(company,
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                            fontWeight: FontWeight.w600))),
+                                if (score is num) ...[
+                                  const SizedBox(width: 6),
+                                  Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 8, vertical: 5),
+                                      decoration: BoxDecoration(
+                                          color: score >= 70
+                                              ? const Color(0xFFECFDF5)
+                                              : const Color(0xFFFFFBEB),
+                                          borderRadius:
+                                              BorderRadius.circular(8)),
+                                      child: Text('${score.round()}%',
+                                          style: TextStyle(
+                                              fontWeight: FontWeight.w700,
+                                              color: score >= 70
+                                                  ? const Color(0xFF059669)
+                                                  : const Color(0xFFD97706))))
+                                ],
+                                if (row['company_verified'] == true)
+                                  const Padding(
+                                      padding: EdgeInsets.only(left: 6),
+                                      child: Tooltip(
+                                          message: 'Empresa Verificada',
+                                          child: Icon(Icons.verified,
+                                              size: 20, color: Brand.teal))),
+                              ]),
+                          const SizedBox(height: 10),
+                          Text(
+                              opportunityValue(row,
+                                  const ['title', 'job_title'], 'Oportunidade'),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleMedium
+                                  ?.copyWith(fontWeight: FontWeight.w700)),
+                          const SizedBox(height: 8),
+                          SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: Text(
+                                  '📍 ${opportunityLocation(row)}  •  💼 ${opportunityModality(row['modality'])}  •  💰 ${opportunitySalary(row)}',
+                                  maxLines: 1,
+                                  style:
+                                      Theme.of(context).textTheme.bodySmall)),
+                        ])))));
+  }
+}

@@ -6,6 +6,8 @@ import 'admin.dart';
 import 'automation_panel.dart';
 import 'ui.dart';
 import 'profile.dart';
+import 'resume.dart';
+import 'access.dart';
 
 class CandidateProfile extends StatefulWidget {
   const CandidateProfile(
@@ -36,7 +38,7 @@ class _CandidateProfileState extends State<CandidateProfile> {
     ])
       key: TextEditingController()
   };
-  bool _premium = false, _busy = false;
+  bool _premium = false, _busy = false, _resumeUploaded = false;
 
   @override
   void initState() {
@@ -53,6 +55,13 @@ class _CandidateProfileState extends State<CandidateProfile> {
     _skills =
         TextEditingController(text: (user['skills'] as List? ?? []).join(', '));
     _premium = user['is_premium'] == true;
+  }
+
+  @override
+  void didUpdateWidget(covariant CandidateProfile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.user['is_premium'] != widget.user['is_premium'])
+      _premium = widget.user['is_premium'] == true;
   }
 
   @override
@@ -108,11 +117,20 @@ class _CandidateProfileState extends State<CandidateProfile> {
       if (bytes == null || bytes.length > 5 * 1024 * 1024) {
         throw const ApiException('Escolha um currículo PDF com até 5 MB.');
       }
-      await _perform(
-          () => widget.api.upload(bytes), 'Seu currículo foi atualizado.');
+      await _perform(() async {
+        await widget.api.upload(bytes);
+        if (mounted) setState(() => _resumeUploaded = true);
+      }, 'Seu currículo foi atualizado.');
     } catch (error) {
       if (mounted) friendlyError(context, error);
     }
+  }
+
+  Future<void> _viewResume() async {
+    await Navigator.push(
+        context,
+        MaterialPageRoute(
+            builder: (_) => ResumeViewer(api: widget.api, path: '/me/resume')));
   }
 
   @override
@@ -132,15 +150,15 @@ class _CandidateProfileState extends State<CandidateProfile> {
       user['email_verified'] == true,
       (brazilPhonePayload(_phone.text) != null),
       skills.isNotEmpty,
-      user['has_resume'] == true,
+      user['has_resume'] == true || _resumeUploaded,
       target.isNotEmpty,
     ].where((value) => value).length;
     final profileStrength = (completion * 100 / 6).round();
-    final premium = _premium || user['is_premium'] == true;
+    final premium = _premium;
     return ListView(
         padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
         children: [
-          if (user['is_admin'] == true)
+          if (hasAdminAccess(user))
             Panel(
                 child: ListTile(
                     leading: const Icon(Icons.admin_panel_settings),
@@ -153,22 +171,11 @@ class _CandidateProfileState extends State<CandidateProfile> {
               premium: premium,
               verified: user['email_verified'] == true,
               completion: profileStrength),
-          const SectionTitle(title: 'Resumo executivo'),
-          Panel(
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                _summaryRow(Icons.work_outline, 'Cargo-alvo',
-                    target.isEmpty ? 'Não informado' : target.join(', ')),
-                _summaryRow(Icons.location_on_outlined, 'Cidade/UF',
-                    locations.isEmpty ? 'Não informada' : locations.join(', ')),
-                _summaryRow(
-                    Icons.payments_outlined,
-                    'Pretensão mínima',
-                    (num.tryParse('${preferences['min_salary'] ?? 0}') ?? 0) > 0
-                        ? formatBrlCurrency(preferences['min_salary'])
-                        : 'Não informada'),
-              ])),
+          ResumeCard(
+              available: user['has_resume'] == true || _resumeUploaded,
+              busy: _busy,
+              onUpload: _upload,
+              onView: _viewResume),
           const SectionTitle(
               title: 'Dados pessoais',
               subtitle:
@@ -249,60 +256,36 @@ class _CandidateProfileState extends State<CandidateProfile> {
                             icon: const Icon(Icons.check),
                             label: const Text('Salvar perfil'))),
                   ]))),
-          Panel(
-              child: Row(children: [
-            Icon(
-                user['has_resume'] == true
-                    ? Icons.task_outlined
-                    : Icons.upload_file_outlined,
-                size: 34,
-                color: Brand.teal),
-            const SizedBox(width: 14),
-            Expanded(
+          ExpansionTile(title: const Text('Experiência e formação'), children: [
+            Panel(
+                child: Column(children: [
+              _summaryRow(Icons.work_outline, 'Cargo-alvo',
+                  target.isEmpty ? 'Não informado' : target.join(', ')),
+              _summaryRow(Icons.location_on_outlined, 'Cidade/UF',
+                  locations.isEmpty ? 'Não informada' : locations.join(', ')),
+            ])),
+            Panel(
                 child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                  Text(
-                      user['has_resume'] == true
-                          ? 'Currículo pronto'
-                          : 'Apresente sua trajetória',
-                      style: Theme.of(context).textTheme.titleMedium),
-                  const Text('PDF privado · até 5 MB e 20 páginas')
-                ])),
-            IconButton(
-                onPressed: _busy ? null : _upload,
-                tooltip: 'Enviar currículo PDF',
-                icon: const Icon(Icons.file_upload_outlined))
-          ])),
-          const SectionTitle(title: 'Experiência e formação'),
-          Panel(
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                const Text('Cursos declarados',
-                    style: TextStyle(fontWeight: FontWeight.w800)),
-                const SizedBox(height: 8),
-                if (courses.isEmpty)
+                  const Text('Cursos declarados',
+                      style: TextStyle(fontWeight: FontWeight.w800)),
+                  const SizedBox(height: 8),
+                  if (courses.isEmpty)
+                    const Text(
+                        'Nenhum curso informado. Os cursos concluídos são autodeclarados.'),
+                  if (courses.isNotEmpty)
+                    Wrap(spacing: 8, children: [
+                      for (final course in courses)
+                        Chip(
+                            avatar: const Icon(Icons.school_outlined, size: 16),
+                            label: Text(course))
+                    ]),
+                  const SizedBox(height: 8),
                   const Text(
-                      'Nenhum curso informado. Os cursos concluídos são autodeclarados.'),
-                if (courses.isNotEmpty)
-                  Wrap(spacing: 8, children: [
-                    for (final course in courses)
-                      Chip(
-                          avatar: const Icon(Icons.school_outlined, size: 16),
-                          label: Text(course))
-                  ]),
-                const SizedBox(height: 8),
-                const Text(
-                    'Experiências profissionais podem ser apresentadas no currículo PDF.'),
-              ])),
-          const ExecutiveHero(
-              title: 'Vagou! Pro',
-              subtitle:
-                  'Critérios salvos, decisões transparentes e automação sob seu controle.',
-              eyebrow: 'SEU PLANO DE CARREIRA',
-              trailing:
-                  Icon(Icons.workspace_premium, color: Color(0xFFFBBF24))),
+                      'Experiências profissionais podem ser apresentadas no currículo PDF.'),
+                ])),
+          ]),
           const SectionTitle(title: 'Meu Plano'),
           Panel(
               child: Column(

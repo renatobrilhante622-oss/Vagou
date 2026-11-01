@@ -45,6 +45,10 @@ class User(Base):
 
 
     @property
+    def has_resume(self) -> bool:
+        return bool(self.resume_key)
+
+    @property
     def is_admin(self):
         return self.role in {'super_admin','moderator'}
 

@@ -47,7 +47,9 @@ class _AdminScreenState extends State<AdminScreen> {
     ];
     data = tab == 3 && !manager
         ? Future.value([])
-        : widget.api.request('GET', paths[tab]);
+        : widget.api
+            .request('GET', paths[tab])
+            .timeout(const Duration(seconds: 15));
   }
 
   Future<String?> note(String title, {bool required = false}) async {

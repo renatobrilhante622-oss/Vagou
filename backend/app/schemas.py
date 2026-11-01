@@ -399,3 +399,49 @@ class AdminUserUpdate(StrictModel):
 class AdminJobAction(StrictModel):
     action: Literal['approve','reject','feature','unfeature','delete']
     note: str = Field(default='', max_length=1000)
+
+
+class OfficialJobItem(StrictModel):
+    job: PublicJobOut
+    category: Literal['internal'] = 'internal'
+    match_score: float | None = None
+    match_reasons: list[str] = Field(default_factory=list)
+
+
+class OfficialJobFeed(StrictModel):
+    items: list[OfficialJobItem]
+    next_offset: int | None = None
+    catalog_status: Literal['available', 'empty'] = 'available'
+
+
+class RecruiterApplicant(StrictModel):
+    id: UUID
+    candidate_name: str
+    candidate_email: EmailStr
+    candidate_phone: str | None = None
+    candidate_skills: list[str] = Field(default_factory=list)
+    candidate_birth_date: date | None = None
+    candidate_age: int | None = None
+    candidate_city: str | None = None
+    candidate_state: str | None = None
+    candidate_seniority: str | None = None
+    candidate_linkedin: str | None = None
+    candidate_summary: str | None = None
+    candidate_resume_available: bool = False
+    job_id: UUID
+    job_title: str
+    status: str
+    match_score: float
+    created_at: datetime
+    preferred_locations: list[str] = Field(default_factory=list)
+    salary_expectation: float | None = None
+    preferred_modalities: list[str] = Field(default_factory=list)
+    completed_course_ids: list[str] = Field(default_factory=list)
+    course_evidence: str = 'self_declared'
+    work_style_fit: str
+
+
+class RecruiterApplicants(StrictModel):
+    items: list[RecruiterApplicant]
+    next_offset: int | None = None
+    filters_applied: dict

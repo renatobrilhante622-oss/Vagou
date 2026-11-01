@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'api.dart';
 import 'admin.dart';
+import 'access.dart';
 import 'candidate.dart';
 import 'courses.dart';
 import 'jobs.dart';
@@ -75,7 +76,7 @@ class _HomeScreenState extends State<HomeScreen> {
           title: VagouBrandMark(
               size: 34, premium: widget.user['is_premium'] == true),
           actions: [
-            if (widget.user['is_admin'] == true)
+            if (hasAdminAccess(widget.user))
               TextButton(
                   onPressed: () => openAdmin(context, widget.api, widget.user),
                   child: const Text('🛡️ Admin')),
@@ -97,57 +98,77 @@ class _HomeScreenState extends State<HomeScreen> {
                     ]),
           ]),
       body: Column(children: [
+        if (recruiter)
+          Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: SegmentedButton<int>(
+                      segments: const [
+                        ButtonSegment(
+                            value: 0, label: Text('Vagas Publicadas')),
+                        ButtonSegment(
+                            value: 1, label: Text('Talentos & Candidatos')),
+                        ButtonSegment(value: 2, label: Text('Minha Empresa'))
+                      ],
+                      selected: {
+                        tab
+                      },
+                      onSelectionChanged: (values) =>
+                          setState(() => tab = values.first)))),
         Expanded(child: IndexedStack(index: tab, children: screens)),
       ]),
-      bottomNavigationBar: Container(
-          margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-          clipBehavior: Clip.antiAlias,
-          decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surface,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: const Color(0xFFE2E8F0)),
-              boxShadow: [
-                BoxShadow(
-                    color: Brand.navy.withValues(alpha: .06),
-                    blurRadius: 18,
-                    offset: const Offset(0, 4))
-              ]),
-          child: NavigationBar(
-              selectedIndex: tab,
-              onDestinationSelected: (v) => setState(() => tab = v),
-              destinations: recruiter
-                  ? const [
-                      NavigationDestination(
-                          icon: Icon(Icons.work_outline),
-                          selectedIcon: Icon(Icons.work),
-                          label: 'Minhas vagas'),
-                      NavigationDestination(
-                          icon: Icon(Icons.people_outline),
-                          selectedIcon: Icon(Icons.people),
-                          label: 'Candidaturas'),
-                      NavigationDestination(
-                          icon: Icon(Icons.business_outlined),
-                          selectedIcon: Icon(Icons.business),
-                          label: 'Empresa'),
-                    ]
-                  : const [
-                      NavigationDestination(
-                          icon: Icon(Icons.work_outline),
-                          selectedIcon: Icon(Icons.work),
-                          label: 'Vagas'),
-                      NavigationDestination(
-                          icon: Icon(Icons.insights_outlined),
-                          selectedIcon: Icon(Icons.insights),
-                          label: 'Relatórios'),
-                      NavigationDestination(
-                          icon: Icon(Icons.school_outlined),
-                          selectedIcon: Icon(Icons.school),
-                          label: 'Cursos'),
-                      NavigationDestination(
-                          icon: Icon(Icons.person_outline),
-                          selectedIcon: Icon(Icons.person),
-                          label: 'Perfil'),
-                    ])),
+      bottomNavigationBar: recruiter
+          ? null
+          : Container(
+              margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              clipBehavior: Clip.antiAlias,
+              decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surface,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                  boxShadow: [
+                    BoxShadow(
+                        color: Brand.navy.withValues(alpha: .06),
+                        blurRadius: 18,
+                        offset: const Offset(0, 4))
+                  ]),
+              child: NavigationBar(
+                  selectedIndex: tab,
+                  onDestinationSelected: (v) => setState(() => tab = v),
+                  destinations: recruiter
+                      ? const [
+                          NavigationDestination(
+                              icon: Icon(Icons.work_outline),
+                              selectedIcon: Icon(Icons.work),
+                              label: 'Vagas Publicadas'),
+                          NavigationDestination(
+                              icon: Icon(Icons.people_outline),
+                              selectedIcon: Icon(Icons.people),
+                              label: 'Talentos & Candidatos'),
+                          NavigationDestination(
+                              icon: Icon(Icons.business_outlined),
+                              selectedIcon: Icon(Icons.business),
+                              label: 'Minha Empresa'),
+                        ]
+                      : const [
+                          NavigationDestination(
+                              icon: Icon(Icons.work_outline),
+                              selectedIcon: Icon(Icons.work),
+                              label: 'Vagas'),
+                          NavigationDestination(
+                              icon: Icon(Icons.insights_outlined),
+                              selectedIcon: Icon(Icons.insights),
+                              label: 'Relatórios'),
+                          NavigationDestination(
+                              icon: Icon(Icons.school_outlined),
+                              selectedIcon: Icon(Icons.school),
+                              label: 'Cursos'),
+                          NavigationDestination(
+                              icon: Icon(Icons.person_outline),
+                              selectedIcon: Icon(Icons.person),
+                              label: 'Perfil'),
+                        ])),
     );
   }
 }

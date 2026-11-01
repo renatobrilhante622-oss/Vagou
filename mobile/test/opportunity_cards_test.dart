@@ -163,18 +163,22 @@ void main() {
         theme: Brand.theme(Brightness.light),
         home: Scaffold(body: JobsView(api: api, onUserChanged: () async {}))));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Radar de Vagas (IA)'));
-    await tester.tap(find.text('Radar de Vagas (IA)'));
+    await tester.ensureVisible(find.text('Radar de Vagas (IA / VIP)'));
+    await tester.tap(find.text('Radar de Vagas (IA / VIP)'));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Possíveis vagas'));
-    await tester.tap(find.text('Possíveis vagas'));
+    await tester.ensureVisible(find.text('Possíveis Vagas'));
+    await tester.tap(find.text('Possíveis Vagas'));
     await tester.pumpAndSettle();
     expect(find.textContaining('fonte(s) externa(s) não responderam'),
         findsNothing);
-    await tester.scrollUntilVisible(find.text('📧 E-mail RH'), 250,
-        scrollable: find.byType(Scrollable).first);
+    expect(find.text(contact), findsNothing);
+    expect(find.text('Competências próximas do perfil.'), findsNothing);
+    await tester.tap(find.text('Analista de Suporte e Sistemas N2'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('📧 E-mail RH'), 200,
+        scrollable: find.byType(Scrollable).last);
     expect(find.text(contact), findsOneWidget);
-    expect(find.text('Competências próximas do perfil.'), findsOneWidget);
+    expect(find.text('Competências próximas do perfil.'), findsNothing);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });

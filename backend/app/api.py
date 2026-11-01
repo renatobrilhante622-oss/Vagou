@@ -18,7 +18,7 @@ from app.matching import compatible_region, evaluate_job, is_brazilian_job, job_
 from app.job_catalog import quarantine_non_brazilian_jobs, unique_reasons
 from app.models import Application, Job, User
 from app.premium import has_premium_access
-from app.schemas import DeleteAccount, JobCreate, JobOut, PublicJobOut, Preferences, ProfileUpdate, StatusUpdate
+from app.schemas import OfficialJobFeed, RecruiterApplicants, DeleteAccount, JobCreate, JobOut, PublicJobOut, Preferences, ProfileUpdate, StatusUpdate
 from app.security import cipher, current_user, role, verify_password
 from app.services import apply, private_storage
 
@@ -32,7 +32,7 @@ DB = Depends(session)
 def account_view(user):
     return {'id': user.id, 'email': user.email, 'name': user.name, 'role': user.role, 'skills': user.skills,
             'is_premium': has_premium_access(user), 'is_admin': user.is_admin, 'is_active': user.is_active, 'automation_enabled': user.automation_enabled,
-            'has_resume': bool(user.resume_key), 'preferences': user.preferences or {},
+            'has_resume': user.has_resume, 'preferences': user.preferences or {},
             'phone': cipher().decrypt(user.phone_encrypted.encode()).decode() if user.phone_encrypted else None,
             'email_verified': user.email_verified, 'company_cnpj': user.company_cnpj,
             'company_name': user.company_name, 'company_contact_email': user.company_contact_email,
@@ -204,16 +204,21 @@ async def create_job(payload: JobCreate, user: User = Recruiter, db: AsyncSessio
 async def jobs(offset: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=100),
                title: str | None = Query(None, max_length=160), city: str | None = Query(None, max_length=80),
                state: str | None = Query(None, min_length=2, max_length=8),
-               keywords: list[str] = Query(default=[], max_length=10), db: AsyncSession = DB):
+               keywords: list[str] = Query(default=[], max_length=10), internal_only: bool = False, db: AsyncSession = DB):
     from app.worker import refresh_job_sources
     preferences = {'titles': [title] if title else [], 'keywords': keywords,
         'locations': [f'{city} / {state}' if state else city] if city else []}
-    await quarantine_non_brazilian_jobs()
-    try:
-        await refresh_job_sources(preferences)
-    except Exception as error:
-        logger.error('public_job_sync_failed error_type=%s', type(error).__name__)
-    rows = (await db.scalars(select(Job).where(Job.active.is_(True), Job.moderation_status == 'approved').order_by(Job.created_at.desc(), Job.id).offset(offset).limit(limit))).all()
+    if not internal_only:
+        await quarantine_non_brazilian_jobs()
+        try:
+            await refresh_job_sources(preferences)
+        except Exception as error:
+            logger.error('public_job_sync_failed error_type=%s', type(error).__name__)
+    query = select(Job).where(Job.active.is_(True), Job.moderation_status == 'approved',
+        or_(Job.expires_at.is_(None),Job.expires_at > datetime.now(timezone.utc)))
+    if internal_only:
+        query = query.where(Job.recruiter_id.is_not(None))
+    rows = (await db.scalars(query.order_by(Job.featured.desc(),Job.created_at.desc(),Job.id).offset(offset).limit(limit))).all()
     verified_ids=set((await db.scalars(select(User.id).where(User.company_verified.is_(True)))).all())
     for job in rows: job._company_verified=job.recruiter_id in verified_ids
     return [job for job in rows if is_brazilian_job(job) and compatible_region(job, preferences)
@@ -341,7 +346,7 @@ async def application_status(application_id: uuid.UUID, payload: StatusUpdate, u
     return {'id': application.id, 'status': application.status, 'status_updated_at': application.status_updated_at}
 
 
-@router.get('/recruiter/applicants')
+@router.get('/recruiter/applicants', response_model=RecruiterApplicants)
 async def recruiter_applicants(
     job_id: uuid.UUID | None = None,
     min_match: int = Query(0, ge=0, le=100),
@@ -382,6 +387,7 @@ async def recruiter_applicants(
                     'id': application.id, 'candidate_name': candidate.name,
                     'candidate_email': candidate.email,
                     'candidate_phone': cipher().decrypt(candidate.phone_encrypted.encode()).decode() if candidate.phone_encrypted else None,
+                    'candidate_resume_available': candidate.has_resume,
                     'candidate_skills': candidate.skills or [], 'candidate_birth_date':candidate.birth_date,
                     'candidate_age': (datetime.now(timezone.utc).year - candidate.birth_date.year - ((datetime.now(timezone.utc).month, datetime.now(timezone.utc).day) < (candidate.birth_date.month, candidate.birth_date.day))) if candidate.birth_date else None,
                     'candidate_city':candidate.candidate_city,'candidate_state':candidate.candidate_state,
@@ -464,7 +470,7 @@ async def courses(skill: str | None = Query(None, max_length=80)):
     return [c for c in COURSES if skill is None or normalize(skill) in {normalize(x) for x in c['skills']}]
 
 
-@router.get('/internal-jobs')
+@router.get('/internal-jobs', response_model=OfficialJobFeed)
 async def internal_jobs(offset: int=Query(0,ge=0),limit: int=Query(20,ge=1,le=100),user: User=Candidate,db: AsyncSession=DB):
     rows=(await db.scalars(select(Job).where(Job.active.is_(True),Job.moderation_status=='approved',Job.recruiter_id.is_not(None),or_(Job.expires_at.is_(None),Job.expires_at > datetime.now(timezone.utc))).order_by(Job.featured.desc(),Job.created_at.desc(),Job.id).offset(offset).limit(limit))).all()
     owners={owner.id:owner.company_verified for owner in (await db.scalars(select(User).where(User.id.in_([job.recruiter_id for job in rows])))).all()} if rows else {}
@@ -472,8 +478,9 @@ async def internal_jobs(offset: int=Query(0,ge=0),limit: int=Query(20,ge=1,le=10
     for job in rows:
         if not is_brazilian_job(job): continue
         job._company_verified=owners.get(job.recruiter_id,False)
-        items.append({'job':PublicJobOut.model_validate(job).model_dump(mode='json'),'category':'internal','match_score':None,'match_reasons':[]})
-    return {'items':items,'next_offset':offset+len(rows) if len(rows)==limit else None}
+        score = evaluate_job(job,user.skills,user.preferences or {})['match_score'] if user.skills or (user.preferences or {}).get('titles') or (user.preferences or {}).get('keywords') else None
+        items.append({'job':PublicJobOut.model_validate(job).model_dump(mode='json'),'category':'internal','match_score':score,'match_reasons':[]})
+    return {'items':items,'next_offset':offset+len(rows) if len(rows)==limit else None,'catalog_status':'available' if items else 'empty'}
 
 
 @router.get('/radar')

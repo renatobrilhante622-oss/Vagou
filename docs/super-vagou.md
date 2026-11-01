@@ -63,3 +63,24 @@ local ignorado; nunca devem ser adicionados ao repositório.
 
 O aplicativo envia `ngrok-skip-browser-warning: true` em JSON, upload e download,
 preserva o endereço configurado e mantém SDK 36/minSdk 24 e permissões Android.
+
+## Navegação e contingência do aplicativo
+
+A vitrine usa duas abas persistentes: **Vagas no App (Oficiais)** e **Radar de Vagas
+(IA / VIP)**. A consulta principal tem limite de espera; se indisponível, anúncios
+internos aprovados podem ser recuperados por `/v1/jobs?internal_only=true`, que não
+consulta coletores externos. Falhas em atualizações preservam o último resultado
+da sessão; nenhuma vaga externa é reclassificada como oficial. Sem anúncios reais,
+a tela apresenta ações de atualização e busca, sem dados demonstrativos.
+
+Os cards resumidos abrem um modal com rolagem independente. Fechar os detalhes não
+refaz consultas nem altera a posição da lista. O perfil reúne força de preenchimento,
+dados pessoais e ações rápidas de currículo. A visualização PDF usa o download
+autenticado e o visualizador nativo do aplicativo; exportação exige ação explícita.
+Dispositivos sem suporte recebem mensagem orientando o download.
+
+O portal do recrutador separa vagas, candidatos e empresa. Ações de WhatsApp e e-mail
+abrem o aplicativo escolhido com mensagem preenchida, sem envio automático pelo
+aplicativo. Apenas candidatos inscritos nas vagas da própria empresa têm seus
+currículos acessíveis. Os botões Admin usam permissões retornadas pelo servidor;
+o e-mail do proprietário não concede privilégios pelo código do cliente.
