@@ -73,6 +73,12 @@ def plain(value, maximum):
     return ' '.join(' '.join(parser.parts).split())[:maximum]
 
 
+def clean_description(value, maximum: int = 30000) -> str:
+    """Normalize published vacancy prose without exposing scripts or guessing facts."""
+    text = plain(value, maximum)
+    return re.sub(r':(?=[A-Za-zÀ-ÿ])', ': ', text).strip()
+
+
 def public_https_url(value: str) -> str:
     try:
         parsed = urlsplit(value)

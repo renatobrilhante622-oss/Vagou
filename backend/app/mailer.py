@@ -20,7 +20,7 @@ from app.application_mail import (process_application_outbox, queue_application_
                                   queue_round_report)
 
 __all__ = ['process_email_outbox', 'process_application_outbox',
-           'queue_application_email', 'queue_round_report']
+           'queue_application_email', 'queue_round_report', 'queue_execution_report']
 
 logger = logging.getLogger('uvicorn.error')
 
@@ -79,3 +79,16 @@ async def process_email_outbox(batch_size: int = 50, only_user_id=None) -> dict:
         return {'sent': sent, 'failed': failed, 'configured': True}
     finally:
         await engine.dispose()
+
+
+async def queue_execution_report(db, user, run, entries):
+    """Save the candidate's executive report alongside application intents.
+
+    SMTP is deliberately deferred until the caller commits the whole round.
+    A saved report is not a delivery receipt.
+    """
+    queued = await queue_round_report(db, user, run, entries)
+    if queued:
+        logger.info('application_round_report_queued run_id=%s registrations=%s',
+                    run.id, run.submitted_applications)
+    return queued

@@ -164,3 +164,11 @@ class BrazilianMetadataTests(unittest.TestCase):
         jobs = self.parse(record)
         self.assertEqual(len(jobs), 1)
         self.assertIn('"especializado"', jobs[0].description)
+
+
+def test_clean_description_normalizes_advertisement_without_script_or_collapsed_heading():
+    from app.job_sources import clean_description, recruitment_contact
+    description = clean_description('<h2>Descrição Geral:</h2>Atendimento <b>técnico</b><script>private()</script><p>Recrutamento:rh@example.com</p>')
+    assert '<' not in description and 'private' not in description
+    assert 'Geral: Atendimento' in description
+    assert recruitment_contact({}, description) == 'rh@example.com'

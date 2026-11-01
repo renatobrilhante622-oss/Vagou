@@ -18,7 +18,7 @@ from urllib.parse import quote, urlencode, urljoin, urlsplit, urlunsplit
 
 import httpx
 
-from app.job_sources import (ExternalJob, FeedError, amount,
+from app.job_sources import (ExternalJob, FeedError, amount, clean_description, recruitment_contact,
                              fetch_feed, parse_job_postings, plain, public_https_url)
 from app.matching import (brazil_state_name, is_brazilian_job, job_location_details,
                           normalize, related_title, text_contains, title_matches)
@@ -213,7 +213,9 @@ def _normalize_brazilian(jobs: list[ExternalJob]) -> list[ExternalJob]:
             continue
         seen.add(key)
         details = job_location_details(job)
-        result.append(replace(job, city=details.get('city'), state=details.get('state'), country='BR',
+        result.append(replace(job, description=clean_description(job.description),
+            contact_email=job.contact_email or recruitment_contact({}, job.description),
+            city=details.get('city'), state=details.get('state'), country='BR',
             keywords=job.keywords or _advertised_skills(job.description)))
     return result
 

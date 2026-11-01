@@ -131,6 +131,8 @@ def _entry(entry: dict) -> dict:
     reasons = entry.get('match_reasons') or []
     return {
         'job_id': _text(entry.get('job_id'), 36),
+        'description': _text(entry.get('description'), 1500),
+        'contact_email': _email(entry.get('contact_email') or entry.get('recruiter_email')),
         'job_title': _text(entry.get('job_title') or entry.get('title'), 160),
         'company_name': _text(entry.get('company_name') or entry.get('company'), 160),
         'location': _text(entry.get('location'), 160), 'source_name': _text(entry.get('source_name'), 120),
@@ -219,7 +221,8 @@ def round_report_message(recipient: str, payload: dict) -> EmailMessage:
         score = f"{row['match_score']}%" if row['match_score'] is not None else 'Não se aplica a link de busca'
         details = [title, row['company_name'], row['location'], row['source_name'],
                    'Compatibilidade: ' + score, status, delivery,
-                   'Canal: ' + row['destination_channel'], '; '.join(row['match_reasons'])]
+                   'Canal: ' + row['destination_channel'], '; '.join(row['match_reasons']),
+                   row['description'], 'Contato de recrutamento: ' + row['contact_email'] if row['contact_email'] else '']
         if row['external_url']:
             details.append(row['external_url'])
         plain.append('\n'.join(value for value in details if value))

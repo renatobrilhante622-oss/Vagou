@@ -409,7 +409,8 @@ def evaluate_job(job, skills: list[str], preferences: dict) -> dict:
         if incompatible not in missed:
             missed.append(incompatible)
     category = 'strong' if score >= 70 else 'possible' if score >= 40 else 'discarded'
-    return {'match_score': score, 'category': category, 'match_reasons': dedupe_reasons(reasons),
+    return {'match_score': score, 'category': category, 'missing_skills': skill_match['missing_skills'],
+            'match_reasons': dedupe_reasons(reasons),
             'missed_reasons': dedupe_reasons(missed)}
 
 

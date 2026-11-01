@@ -23,6 +23,7 @@ from app.matching import compatible_region, dedupe_reasons, evaluate_job, is_bra
 from app.models import Application, Job, User
 from app.premium import has_premium_access, premium_test_emails
 from app.services import apply
+from app.job_sources import clean_description
 
 celery = Celery('vagou', broker=settings().redis_url, backend=settings().redis_url)
 celery.conf.update(
@@ -51,7 +52,7 @@ def evaluation_reasons(evaluation):
 def vacancy_snapshot(job):
     """Public vacancy facts only; unknown values remain explicitly unknown."""
     geography = job_location_details(job)
-    return {'description': (job.description or '')[:3000],
+    return {'description': clean_description(job.description, 3000),
             'contact_email': job.contact_email, 'city': geography.get('city'),
             'state': geography.get('state'), 'modality': job.modality,
             'contract_type': job.contract_type,
@@ -265,8 +266,8 @@ async def automate(candidate_id=None, force=False, run_id=None, progress=None):
                                         'filtered_jobs': run.filtered_jobs, 'possible_match_jobs': run.possible_match_jobs,
                                         'eligible_jobs': run.eligible_jobs, 'submitted_applications': run.submitted_applications,
                                         'manual_review_jobs': run.manual_review_jobs, 'search_channels_count': run.search_channels_count})
-                        from app.mailer import queue_round_report
-                        await queue_round_report(db, user, run, entries)
+                        from app.mailer import queue_execution_report
+                        await queue_execution_report(db, user, run, entries)
                         run.status = 'complete'
                         run.finished_at = datetime.now(timezone.utc)
                     # Only enqueue delivery after commit. SMTP runs in its own task;

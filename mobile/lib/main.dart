@@ -34,18 +34,28 @@ class _VagouAppState extends State<VagouApp> {
   }
 
   Future<void> initialize() async {
-    setState(() { loading = true; error = null; });
+    setState(() {
+      loading = true;
+      error = null;
+    });
     try {
       onboarding = await api.storage.read(key: 'onboarding_seen') != 'true';
-      if (await api.restore()) user = Map<String, dynamic>.from(await api.request('GET', '/me'));
+      if (await api.restore())
+        user = Map<String, dynamic>.from(await api.request('GET', '/me'));
     } catch (e) {
       if (e is! ApiException || e.status != 401) error = e;
-    } finally { if (mounted) setState(() => loading = false); }
+    } finally {
+      if (mounted) setState(() => loading = false);
+    }
   }
 
   Future<void> authenticated() async {
     final result = Map<String, dynamic>.from(await api.request('GET', '/me'));
-    if (mounted) setState(() { user = result; error = null; });
+    if (mounted)
+      setState(() {
+        user = result;
+        error = null;
+      });
   }
 
   Future<void> refreshUser() async {
@@ -59,18 +69,49 @@ class _VagouAppState extends State<VagouApp> {
   }
 
   @override
-  void dispose() { api.client.close(); super.dispose(); }
+  void dispose() {
+    api.client.close();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) => MaterialApp(
-    navigatorKey: navigator, title: 'Vagou!', debugShowCheckedModeBanner: false,
-    theme: Brand.theme(Brightness.light), darkTheme: Brand.theme(Brightness.dark), themeMode: ThemeMode.system,
-    home: Builder(builder: (context) {
-      if (loading) return const Scaffold(body: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [BrandMark(size: 62), SizedBox(height: 28), CircularProgressIndicator()])));
-      if (error != null) return Scaffold(body: EmptyState(icon: Icons.cloud_off_rounded, title: 'Vamos reconectar?', message: error is ApiException ? (error as ApiException).message : 'Não foi possível acessar sua conta agora.', onRetry: initialize));
-      if (onboarding) return OnboardingScreen(onComplete: () async { await api.storage.write(key: 'onboarding_seen', value: 'true'); if (mounted) setState(() => onboarding = false); });
-      if (user == null) return AuthScreen(api: api, onAuthenticated: authenticated);
-      return HomeScreen(api: api, user: user!, onRefreshUser: refreshUser, onSignedOut: endSession);
-    }),
-  );
+        navigatorKey: navigator,
+        title: 'Vagou!',
+        debugShowCheckedModeBanner: false,
+        theme: Brand.theme(Brightness.light),
+        darkTheme: Brand.theme(Brightness.dark),
+        themeMode: ThemeMode.system,
+        home: Builder(builder: (context) {
+          if (loading)
+            return const Scaffold(
+                body: Center(
+                    child: Column(mainAxisSize: MainAxisSize.min, children: [
+              VagouBrandMark(size: 62),
+              SizedBox(height: 28),
+              CircularProgressIndicator()
+            ])));
+          if (error != null)
+            return Scaffold(
+                body: EmptyState(
+                    icon: Icons.cloud_off_rounded,
+                    title: 'Vamos reconectar?',
+                    message: error is ApiException
+                        ? (error as ApiException).message
+                        : 'Não foi possível acessar sua conta agora.',
+                    onRetry: initialize));
+          if (onboarding)
+            return OnboardingScreen(onComplete: () async {
+              await api.storage.write(key: 'onboarding_seen', value: 'true');
+              if (mounted) setState(() => onboarding = false);
+            });
+          if (user == null)
+            return AuthScreen(api: api, onAuthenticated: authenticated);
+          return HomeScreen(
+              api: api,
+              user: user!,
+              onRefreshUser: refreshUser,
+              onSignedOut: endSession);
+        }),
+      );
 }

@@ -1,6 +1,6 @@
 # Contratos dos testes mobile
 
-Inventário anterior à revisão executiva; expectativas salariais atualizadas em sincronia.
+Inventário de seletores; métodos State e contratos da API preservados.
 
 ## api_test.dart
 
@@ -44,7 +44,7 @@ await tester.tap(find.text('Pular'));
 ```dart
 expect(find.text('Empresa Brasileira de Tecnologia · Brasília / DF'),
 expect(find.text('55% de compatibilidade'), findsOneWidget);
-expect(find.text('R\$ 3000 a R\$ 4500'), findsOneWidget);
+expect(find.text('R\$ 3.000 a R\$ 4.500'), findsOneWidget);
 expect(find.text('Híbrido'), findsOneWidget);
 expect(find.text('CLT'), findsOneWidget);
 expect(find.text('Competências próximas do perfil.'), findsOneWidget);
@@ -86,7 +86,7 @@ expect(find.text('Premium Ativo'), findsOneWidget);
 await tester.tap(find.text('Abrir filtros'));
 final city = find.byWidgetPredicate((widget) => widget is TextField && widget.decoration?.labelText == 'Cidade');
 await tester.scrollUntilVisible(find.text('Salvar preferências'), 250,
-scrollable: find.byType(Scrollable).last);
+scrollable: find.byType(Scrollable).first);
 await tester.tap(find.text('Salvar preferências'));
 await tester.tap(find.text('Abrir robô'));
 await tester.ensureVisible(find.text('Iniciar Varredura e Envio Agora'));
@@ -112,4 +112,28 @@ expect(find.text('Ligar para candidato'), findsOneWidget);
 expect(find.text('+5511999999999'), findsOneWidget);
 expect(find.text('Resumo do currículo'), findsOneWidget);
 expect(find.text('Competências declaradas: Python · Atendimento ao cliente'), findsOneWidget);
+```
+
+## redesign_flows_test.dart
+
+```dart
+expect(find.text('IA de Recrutamento & Automação de Carreira'),
+find.text('Sou Recrutador / Empresa'), 160,
+scrollable: find.byType(Scrollable).first);
+await tester.tap(find.text('Sou Recrutador / Empresa'));
+find.text('Ainda não tem conta? Cadastre-se'), 200,
+scrollable: find.byType(Scrollable).first);
+await tester.tap(find.text('Ainda não tem conta? Cadastre-se'));
+await tester.scrollUntilVisible(find.text('Sua empresa'), 200,
+scrollable: find.byType(Scrollable).first);
+expect(find.text('CNPJ (com ou sem máscara)'), findsOneWidget);
+expect(find.text('Central de Recrutamento'), findsOneWidget);
+expect(find.text('PRO'), findsOneWidget);
+expect(find.text('01 · Identidade da oportunidade'), findsOneWidget);
+await tester.scrollUntilVisible(find.text('Enviar para aprovação'), 250,
+scrollable: find.byType(Scrollable).first);
+expect(find.text('03 · Perfil ideal'), findsOneWidget);
+expect(find.text('PRO'), findsOneWidget);
+expect(find.text('Sua carreira merece um novo espaço.'), findsOneWidget);
+expect(find.text('Continuar'), findsOneWidget);
 ```

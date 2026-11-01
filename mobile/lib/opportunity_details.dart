@@ -139,26 +139,45 @@ class _OpportunityDetailsState extends State<OpportunityDetails> {
         ['https', 'http'].contains(uri.scheme) &&
         uri.host.isNotEmpty;
     final contract = opportunityValue(row, const ['contract_type']);
-    final description = opportunityValue(
-        row, const ['description', 'job_description', 'description_summary']);
+    final description = opportunityValue(row,
+            const ['description', 'job_description', 'description_summary'])
+        .replaceAll(RegExp(r'<[^>]*>'), ' ')
+        .replaceAll('&nbsp;', ' ')
+        .replaceAll('&amp;', '&')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .replaceAllMapped(RegExp(r':(?=[A-Za-zÀ-ÿ])'), (m) => ': ')
+        .trim();
     final search = row['status'] == 'search_channel';
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       if (widget.showHeader) ...[
-        Text(title,
-            style: Theme.of(context)
-                .textTheme
-                .titleMedium
-                ?.copyWith(fontWeight: FontWeight.w800)),
-        const SizedBox(height: 4),
-        Text('$company · ${opportunityLocation(row)}'),
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          CompanyAvatar(company: company),
+          const SizedBox(width: 12),
+          Expanded(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                Text('$company · ${opportunityLocation(row)}',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                const SizedBox(height: 8),
+                Text(title,
+                    style: const TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                        height: 1.3)),
+              ]))
+        ]),
       ],
       const SizedBox(height: 10),
       Wrap(spacing: 8, runSpacing: 4, children: [
         if (!search && widget.showScore && row['match_score'] != null)
           Chip(
-              backgroundColor: (num.tryParse('${row['match_score']}') ?? 0) >= 70
-                  ? const Color(0xFFECFDF5)
-                  : const Color(0xFFFFFBEB),
+              backgroundColor:
+                  (num.tryParse('${row['match_score']}') ?? 0) >= 70
+                      ? const Color(0xFFECFDF5)
+                      : const Color(0xFFFFFBEB),
               labelStyle: TextStyle(
                   color: (num.tryParse('${row['match_score']}') ?? 0) >= 70
                       ? const Color(0xFF059669)
@@ -174,15 +193,21 @@ class _OpportunityDetailsState extends State<OpportunityDetails> {
                   }[row['status']] ??
                   statusLabel('${row['status']}'))),
         if (row['modality'] != null)
-          Chip(label: Text(opportunityModality(row['modality']))),
+          Chip(
+              avatar: const Icon(Icons.location_on_outlined, size: 16),
+              label: Text(opportunityModality(row['modality']))),
         if (contract.isNotEmpty)
-          Chip(label: Text(contractLabels[contract] ?? contract.toUpperCase())),
+          Chip(
+              avatar: const Icon(Icons.business_center_outlined, size: 16),
+              label: Text(contractLabels[contract] ?? contract.toUpperCase())),
       ]),
       if (!search) ...[
         const SizedBox(height: 6),
         if (!widget.showHeader) Text(opportunityLocation(row)),
-        Text(opportunitySalary(row),
-            style: const TextStyle(fontWeight: FontWeight.w600)),
+        Chip(
+            avatar: const Icon(Icons.payments_outlined, size: 16),
+            label: Text(opportunitySalary(row),
+                style: const TextStyle(fontWeight: FontWeight.w600))),
         const SizedBox(height: 12),
         Text('Resumo da vaga',
             style: Theme.of(context)
@@ -190,12 +215,21 @@ class _OpportunityDetailsState extends State<OpportunityDetails> {
                 .bodyMedium
                 ?.copyWith(fontWeight: FontWeight.w800)),
         const SizedBox(height: 6),
-        Text(
-            description.isEmpty
-                ? 'Descrição não disponível neste registro. Consulte os detalhes da oportunidade.'
-                : description,
-            maxLines: expanded ? null : 3,
-            overflow: expanded ? null : TextOverflow.ellipsis),
+        Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? const Color(0xFF1E293B)
+                    : const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFFE2E8F0))),
+            child: Text(
+                description.isEmpty
+                    ? 'Descrição não disponível neste registro. Consulte os detalhes da oportunidade.'
+                    : description,
+                maxLines: expanded ? null : 3,
+                overflow: expanded ? null : TextOverflow.ellipsis)),
         if (description.isNotEmpty)
           TextButton.icon(
             onPressed: () => setState(() => expanded = !expanded),
@@ -221,6 +255,7 @@ class _OpportunityDetailsState extends State<OpportunityDetails> {
               const Text('📧 E-mail da vaga',
                   style: TextStyle(fontWeight: FontWeight.w800)),
               const SizedBox(height: 4),
+              const Text('Canal direto do RH', style: TextStyle(fontSize: 11)),
               SelectableText(contact),
               Wrap(spacing: 8, runSpacing: 4, children: [
                 TextButton.icon(

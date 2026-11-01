@@ -13,7 +13,7 @@ http.Response jsonResponse(Object body) => http.Response(jsonEncode(body), 200,
     headers: {'content-type': 'application/json'});
 
 void useMobileViewport(WidgetTester tester) {
-  tester.view.physicalSize = const Size(430, 932);
+  tester.view.physicalSize = const Size(320, 932);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
@@ -70,8 +70,9 @@ void main() {
     await tester.pumpAndSettle();
     final city = find.byWidgetPredicate((widget) => widget is TextField && widget.decoration?.labelText == 'Cidade');
     await tester.enterText(city, 'Recife');
+    // At 320px nested horizontal controls also expose Scrollables; target the sheet.
     await tester.scrollUntilVisible(find.text('Salvar preferências'), 250,
-      scrollable: find.byType(Scrollable).last);
+      scrollable: find.byType(Scrollable).first);
     await tester.tap(find.text('Salvar preferências'));
     await tester.pumpAndSettle();
 
