@@ -50,10 +50,15 @@ void viewport(WidgetTester tester, double width) {
 }
 
 void main() {
-  test('Brazilian salary formatting groups thousands and collapses equal bounds', () {
-    expect(opportunitySalary({'salary_min': 1750.0, 'salary_max': 1750.0}), 'R\$ 1.750');
-    expect(opportunitySalary({'salary_min': 2500, 'salary_max': 3500}), 'R\$ 2.500 a R\$ 3.500');
+  test('salary ranges use Brazilian formatting and collapse equal values', () {
+    expect(
+        opportunitySalary({...opportunity, 'salary_min': 1750.0, 'salary_max': 1750}),
+        'R\$ 1.750');
+    expect(
+        opportunitySalary({...opportunity, 'salary_min': 2500, 'salary_max': 3500}),
+        'R\$ 2.500 a R\$ 3.500');
   });
+
   test('repeated reasons and historical detail become a single explanation',
       () {
     expect(

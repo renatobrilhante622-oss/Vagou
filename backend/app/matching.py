@@ -37,6 +37,7 @@ _KNOWN_SKILLS = ('python', 'javascript', 'java', 'sql', 'postgresql', 'docker',
     'technical support', 'service desk', 'help desk', 'networking', 'infrastructure',
     'windows', 'linux', 'active directory', 'tcp/ip', 'hardware', 'office 365',
     'information technology', 'systems')
+_TECHNICAL_SKILLS = set(_KNOWN_SKILLS) - {'sales', 'customer support', 'human resources', 'excel'}
 
 _BRAZIL_STATES = {
     'AC': 'Acre', 'AL': 'Alagoas', 'AP': 'Amapá', 'AM': 'Amazonas',
@@ -295,6 +296,8 @@ def evaluate_job(job, skills: list[str], preferences: dict) -> dict:
         searchable_skills = ' '.join([job.title, job.description])
         requirements = advertised_skills(searchable_skills)
     skill_match = match(skills, requirements)
+    title_match = False
+    covered = 0
     if requirements:
         components.append((0.35, skill_match['match_score']))
         if skill_match['match_score'] == 100:
@@ -377,10 +380,21 @@ def evaluate_job(job, skills: list[str], preferences: dict) -> dict:
         relevant = False
     if not relevant:
         return {'match_score': 0, 'category': 'discarded', 'match_reasons': [],
-                'missed_reasons': ['A área profissional da vaga não corresponde ao perfil buscado.']}
+                'missed_reasons': ['A área profissional da vaga não corresponde à sua busca.']}
 
     total_weight = sum(weight for weight, _ in components)
     score = round(sum(weight * value for weight, value in components) / total_weight) if total_weight else 0
+    technical_requirements = [
+        requirement for requirement in requirements
+        if canonical_text(requirement) in _TECHNICAL_SKILLS
+    ]
+    technical_skill_match = match(skills, technical_requirements)['match_score'] if technical_requirements else 0
+    semantic_match = title_match or adjacent_role or covered > 0 or technical_skill_match > 0
+    if not titles and not keywords:
+        semantic_match = semantic_match or skill_match['match_score'] > 0
+    if not semantic_match:
+        score = min(score, 39)
+        missed.append('Cargo, área ou palavra-chave técnica não corresponde à sua busca.')
     if minimum and float(job.salary_max or 0) == 0:
         score = min(score, 69)  # Unknown remuneration cannot authorize a paid-range submission.
     if inferred:
