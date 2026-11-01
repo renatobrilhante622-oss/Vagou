@@ -320,6 +320,8 @@ class OpportunitySummary extends StatelessWidget {
                 borderRadius: BorderRadius.circular(12),
                 side: const BorderSide(color: Color(0xFFE2E8F0))),
             clipBehavior: Clip.antiAlias,
+            elevation: 1,
+            shadowColor: Brand.navy.withValues(alpha: .06),
             child: InkWell(
                 onTap: onTap,
                 child: Padding(

@@ -36,6 +36,38 @@ String birthDateDisplay(dynamic value) {
       : '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
 }
 
+String formatBrazilDate(String input) {
+  final digits = input.replaceAll(RegExp(r'\D'), '');
+  final date = digits.length > 8 ? digits.substring(0, 8) : digits;
+  if (date.length <= 2) return date;
+  if (date.length <= 4) return '${date.substring(0, 2)}/${date.substring(2)}';
+  return '${date.substring(0, 2)}/${date.substring(2, 4)}/${date.substring(4)}';
+}
+
+bool validBrazilDate(String input) {
+  if (input.isEmpty) return true;
+  if (!RegExp(r'^\d{2}/\d{2}/\d{4}$').hasMatch(input)) return false;
+  final day = int.parse(input.substring(0, 2));
+  final month = int.parse(input.substring(3, 5));
+  final year = int.parse(input.substring(6, 10));
+  final date = DateTime(year, month, day);
+  return year >= 1900 &&
+      !date.isAfter(DateTime.now()) &&
+      date.day == day &&
+      date.month == month &&
+      date.year == year;
+}
+
+class BrazilDateFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+      TextEditingValue oldValue, TextEditingValue newValue) {
+    final text = formatBrazilDate(newValue.text);
+    return TextEditingValue(
+        text: text, selection: TextSelection.collapsed(offset: text.length));
+  }
+}
+
 class CandidateDetailsFields extends StatelessWidget {
   final Map<String, TextEditingController> controllers;
   final bool enabled;
@@ -70,13 +102,21 @@ class CandidateDetailsFields extends StatelessWidget {
                   controller: controllers[item.$1],
                   enabled: enabled,
                   maxLines: item.$1 == 'professional_summary' ? 3 : 1,
+                  inputFormatters: item.$1 == 'birth_date'
+                      ? [BrazilDateFormatter()]
+                      : null,
                   keyboardType: item.$1 == 'desired_salary'
                       ? const TextInputType.numberWithOptions(decimal: true)
                       : item.$1 == 'birth_date'
-                          ? TextInputType.datetime
+                          ? TextInputType.number
                           : TextInputType.text,
                   decoration: InputDecoration(
-                      labelText: item.$2, prefixIcon: Icon(item.$3)))),
+                      labelText: item.$2, prefixIcon: Icon(item.$3)),
+                  validator: item.$1 == 'birth_date'
+                      ? (value) => validBrazilDate(value ?? '')
+                          ? null
+                          : 'Informe uma data válida em DD/MM/AAAA.'
+                      : null)),
         DropdownButtonFormField<String>(
             isExpanded: true,
             initialValue: controllers['seniority']!.text.isEmpty

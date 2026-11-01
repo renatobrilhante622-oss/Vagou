@@ -22,6 +22,12 @@ void main() {
   test('Brazil phone formatting and decimal salary preserve API values', () {
     expect(formatBrazilPhone('61999991234'), '+55 (61) 99999-1234');
     expect(formatBrazilPhone('+55 (61) 99999-1234'), '+55 (61) 99999-1234');
+    expect(formatBrazilDate('14051990'), '14/05/1990');
+    expect(validBrazilDate('29/02/2024'), isTrue);
+    expect(validBrazilDate('29/02/2023'), isFalse);
+    expect(validBrazilDate('31/04/2024'), isFalse);
+    expect(validBrazilDate('01/01/1899'), isFalse);
+    expect(validBrazilDate('01/01/2999'), isFalse);
     expect(
         brazilPhonePayload(formatBrazilPhone('61999991234')), '+5561999991234');
     expect(brazilPhonePayload('+55 '), isNull);
@@ -87,7 +93,7 @@ void main() {
         theme: Brand.theme(Brightness.light),
         home: Scaffold(body: JobsView(api: api, onUserChanged: () async {}))));
     await tester.pumpAndSettle();
-    expect(find.text('Vagas no App (Oficiais)'), findsOneWidget);
+    expect(find.text('Vagas no App (Empresas)'), findsOneWidget);
     expect(find.text('Empresa Verificada'), findsOneWidget);
     expect(find.byTooltip('Empresa Verificada'), findsOneWidget);
     expect(find.text('85%'), findsOneWidget);

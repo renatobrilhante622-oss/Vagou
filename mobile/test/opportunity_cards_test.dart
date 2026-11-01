@@ -163,8 +163,8 @@ void main() {
         theme: Brand.theme(Brightness.light),
         home: Scaffold(body: JobsView(api: api, onUserChanged: () async {}))));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Radar de Vagas (IA / VIP)'));
-    await tester.tap(find.text('Radar de Vagas (IA / VIP)'));
+    await tester.ensureVisible(find.text('Radar de Vagas (IA)'));
+    await tester.tap(find.text('Radar de Vagas (IA)'));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('Possíveis Vagas'));
     await tester.tap(find.text('Possíveis Vagas'));

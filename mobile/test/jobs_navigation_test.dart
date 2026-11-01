@@ -109,7 +109,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Analista de Suporte 1'), findsOneWidget);
     expect(find.text('Analista de Suporte 2'), findsNothing);
-    await tester.tap(find.text('Radar de Vagas (IA / VIP)'));
+    await tester.tap(find.text('Radar de Vagas (IA)'));
     await tester.pumpAndSettle();
     expect(find.text('Radar exclusivo PRO'), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -129,7 +129,7 @@ void main() {
     addTearDown(api.client.close);
     await tester.pumpWidget(app(api));
     await tester.pump();
-    expect(find.text('Vagas no App (Oficiais)'), findsOneWidget);
+    expect(find.text('Vagas no App (Empresas)'), findsOneWidget);
     await tester.pump(const Duration(seconds: 15));
     await tester.pumpAndSettle();
     expect(find.text('Analista de Suporte 1'), findsOneWidget);

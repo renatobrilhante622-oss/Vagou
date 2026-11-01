@@ -13,6 +13,10 @@ class Brand {
       primary: dark ? const Color(0xFF93C5FD) : navy,
       secondary: teal,
       surface: dark ? const Color(0xFF131F2E) : Colors.white,
+      onSurface: dark ? const Color(0xFFE2E8F0) : navy,
+      onSurfaceVariant: dark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+      outline: const Color(0xFFE2E8F0),
+      outlineVariant: const Color(0xFFE2E8F0),
     );
     return ThemeData(
       useMaterial3: true,
@@ -43,6 +47,8 @@ class Brand {
       ),
       filledButtonTheme: FilledButtonThemeData(
           style: FilledButton.styleFrom(
+              backgroundColor: dark ? const Color(0xFF3B82F6) : teal,
+              foregroundColor: Colors.white,
               minimumSize: const Size(0, 52),
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12)))),

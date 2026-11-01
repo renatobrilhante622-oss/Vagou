@@ -290,11 +290,11 @@ class _JobsViewState extends State<JobsView>
               tabs: const [
                 Tab(
                     height: 54,
-                    child: Text('Vagas no App (Oficiais)',
+                    child: Text('Vagas no App (Empresas)',
                         textAlign: TextAlign.center, maxLines: 2)),
                 Tab(
                     height: 54,
-                    child: Text('Radar de Vagas (IA / VIP)',
+                    child: Text('Radar de Vagas (IA)',
                         textAlign: TextAlign.center, maxLines: 2))
               ])),
       if (loading || loadingMore) const LinearProgressIndicator(minHeight: 2),
@@ -392,7 +392,7 @@ class _JobsViewState extends State<JobsView>
                             SectionTitle(
                                 title: radar
                                     ? 'Nenhum resultado nesta categoria'
-                                    : 'Novas vagas oficiais em breve',
+                                    : 'Nenhuma vaga oficial aprovada disponível',
                                 subtitle: radar
                                     ? 'Ajuste os filtros ou consulte os canais oficiais abaixo.'
                                     : 'As vagas de empresas parceiras aparecem após aprovação. Você pode atualizar a lista ou explorar o Radar.'),
